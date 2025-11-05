@@ -1,0 +1,10 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "WEBSITE_TIME_ZONE": "America/Sao_Paulo",
+    "TICKERS": "PETR4.SA,ITUB4.SA",
+    "BLOB_CONTAINER": "techchallenge04storage"
+  }
+}
