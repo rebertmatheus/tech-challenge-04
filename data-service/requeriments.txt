@@ -1,0 +1,6 @@
+azure-functions
+pandas
+pyarrow
+yfinance
+azure-storage-blob
+python-dateutil
