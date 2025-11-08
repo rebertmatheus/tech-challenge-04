@@ -1,228 +1,162 @@
-import os
-import io
 import logging
-import time
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-
+import json
 import azure.functions as func
-import pandas as pd
-import yfinance as yf
-from azure.storage.blob import BlobServiceClient
-from azure.core.exceptions import ResourceExistsError
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from utils.config import Config
+from utils.storage import get_storage_client
+from utils.yfinance_client import YFinanceClient
+from utils.parquet_handler import ParquetHandler
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+
+def setup_logger(name: str):
+    """Configura logger estruturado"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    return logging.getLogger(name)
 
 @app.function_name(name="fetch_day")
 @app.route(route="fetch-day", methods=["GET"])
 def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("fetch_day")
-    
-    logger.info("Iniciando execução da função fetch_day")
-    
-    tickers_env = os.getenv("TICKERS", "").strip()
-    if not tickers_env:
-        logger.error("Variável de ambiente TICKERS não definida.")
-        return func.HttpResponse(
-            "Erro: TICKERS não definido",
-            status_code=400
-        )
-
-    container_name = os.getenv("BLOB_CONTAINER", "techchallenge04storage")
-    conn_str = os.getenv("AzureWebJobsStorage")
-    if not conn_str:
-        logger.error("AzureWebJobsStorage não definida.")
-        return func.HttpResponse(
-            "Erro: AzureWebJobsStorage não definido",
-            status_code=500
-        )
-
-    # Data do dia no fuso de São Paulo (para partição year/month/day)
-    tz = ZoneInfo("America/Sao_Paulo")
-    now_sp = datetime.now(tz)
-    year = f"{now_sp.year:04d}"
-    month = f"{now_sp.month:02d}"
-    day = f"{now_sp.day:02d}"
+    """Busca dados do dia atual para os tickers configurados"""
+    logger = setup_logger("fetch_day")
+    logger.info("Iniciando execução")
 
     try:
-        blob_service = BlobServiceClient.from_connection_string(conn_str)
-        container_client = blob_service.get_container_client(container_name)
-        try:
-            container_client.create_container()
-            logger.info(f"Container {container_name} criado")
-        except ResourceExistsError:
-            logger.info(f"Container {container_name} já existe")
-    except Exception as e:
-        logger.exception("Falha ao conectar no Azure Blob Storage: %s", e)
+        # Configuração
+        tickers = Config.get_tickers()
+        storage_config = Config.get_storage_config()
+
+        if not storage_config["conn_str"]:
+            return func.HttpResponse(
+                body='{"success": false, "error": "AzureWebJobsStorage não definido"}',
+                status_code=500,
+                mimetype="application/json"
+            )
+
+        # Clientes
+        container_client = get_storage_client(
+            storage_config["conn_str"],
+            storage_config["container"]
+        )
+        yf_client = YFinanceClient()
+        parquet_handler = ParquetHandler(container_client)
+
+        # Data do dia
+        tz = ZoneInfo("America/Sao_Paulo")
+        now_sp = datetime.now(tz)
+
+        # Processa tickers
+        successful = 0
+        failed = 0
+        results = []
+
+        for ticker in tickers:
+            try:
+                df = yf_client.fetch_ticker_data(
+                    ticker=ticker,
+                    start=now_sp.strftime("%Y-%m-%d"),
+                    end=now_sp.strftime("%Y-%m-%d")
+                )
+
+                if df is None or df.empty:
+                    failed += 1
+                    results.append(f"{ticker}: Sem dados")
+                    continue
+
+                blob_path = parquet_handler.save_daily_data(df, ticker, now_sp)
+                successful += 1
+                results.append(f"{ticker}: OK")
+
+            except Exception as e:
+                logger.exception(f"Erro ao processar {ticker}")
+                failed += 1
+                results.append(f"{ticker}: Erro - {str(e)}")
+
+        # Resposta
+        response = {
+            "status": "completed",
+            "timestamp": now_sp.isoformat(),
+            "successful": successful,
+            "failed": failed,
+            "results": results
+        }
+
+        logger.info(f"Finalizado: {successful} sucessos, {failed} falhas")
+
         return func.HttpResponse(
-            f"Erro ao conectar no storage: {str(e)}",
-            status_code=500
+            body=json.dumps(response),
+            status_code=200,
+            mimetype="application/json"
         )
 
-    tickers = [t.strip() for t in tickers_env.split(",") if t.strip()]
-    logger.info("Processando tickers: %s", tickers)
-
-    successful = 0
-    failed = 0
-    results = []
-
-    for ticker in tickers:
-        try:
-            # Busca do dia (se não houver pregão, DataFrame pode vir vazio)
-            df = yf.Ticker(f"{ticker}.SA").history(period="1d", interval="1d", auto_adjust=False)
-            if df is None or df.empty:
-                logger.warning("Sem dados para %s no dia %s-%s-%s", ticker, year, month, day)
-                failed += 1
-                results.append(f"{ticker}: Sem dados")
-                continue
-
-            # Garantir índice/colunas apropriados antes do parquet
-            df = df.reset_index()  # 'Date' vira coluna
-            
-            # Adiciona metadata
-            df["execution_timestamp"] = now_sp.isoformat()
-            df["ticker"] = ticker
-
-            # Serializa em Parquet para memória
-            buf = io.BytesIO()
-            df.to_parquet(buf, index=False)
-            buf.seek(0)
-
-            # Caminho: year/month/day/{ticker}.parquet
-            blob_path = f"{year}/{month}/{day}/{ticker}.parquet"
-            blob_client = container_client.get_blob_client(blob_path)
-
-            # Upload sobrescrevendo se já existir
-            blob_client.upload_blob(buf, overwrite=True)
-            logger.info("Gravado blob: %s", blob_path)
-            successful += 1
-            results.append(f"{ticker}: OK")
-
-        except Exception as e:
-            logger.exception("Falha ao processar %s: %s", ticker, e)
-            failed += 1
-            results.append(f"{ticker}: Erro - {str(e)}")
-
-    # Resposta detalhada
-    response_msg = {
-        "status": "completed",
-        "timestamp": now_sp.isoformat(),
-        "successful": successful,
-        "failed": failed,
-        "results": results
-    }
-    
-    logger.info(f"Execução finalizada: {successful} sucessos, {failed} falhas")
-    
-    return func.HttpResponse(
-        body=str(response_msg),
-        status_code=200,
-        mimetype="application/json"
-    )
+    except ValueError as e:
+        logger.error(f"Erro de configuração: {e}")
+        return func.HttpResponse(
+            body=f'{{"success": false, "error": "{str(e)}"}}',
+            status_code=400,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logger.exception("Erro inesperado")
+        return func.HttpResponse(
+            body=f'{{"success": false, "error": "{str(e)}"}}',
+            status_code=500,
+            mimetype="application/json"
+        )
 
 @app.function_name(name="fetch_history")
 @app.route(route="fetch-history", methods=["GET"])
 def fetch_history(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Busca dados históricos dos tickers
-    Salva em: history/{ticker}.parquet
-    """
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("fetch_history")
+    """Busca histórico completo dos tickers"""
+    logger = setup_logger("fetch_history")
+    logger.info("Iniciando execução")
 
-    logger.info("Iniciando execução da função fetch_history")
-
-    # Pega configurações das env vars
-    start_date = os.getenv("START_DATE", "2018-01-01")
-    end_date = os.getenv("END_DATE", "2025-10-31")
-
-    tickers_env = os.getenv("TICKERS", "").strip()
-    if not tickers_env:
-        logger.error("Variável de ambiente TICKERS não definida")
-        return func.HttpResponse(
-            body='{"success": false, "error": "TICKERS não definido"}',
-            status_code=400,
-            mimetype="application/json"
-        )
-
-    tickers = [t.strip() for t in tickers_env.split(",") if t.strip()]
-    logger.info(f"Processando tickers: {tickers}")
-    logger.info(f"Período: {start_date} até {end_date}")
-
-    # Storage config
-    container_name = os.getenv("BLOB_CONTAINER", "techchallenge04storage")
-    conn_str = os.getenv("AzureWebJobsStorage")
-    if not conn_str:
-        logger.error("AzureWebJobsStorage não definida")
-        return func.HttpResponse(
-            body='{"success": false, "error": "AzureWebJobsStorage não definido"}',
-            status_code=500,
-            mimetype="application/json"
-        )
-
-    # Conecta no storage
     try:
-        blob_service = BlobServiceClient.from_connection_string(conn_str)
-        container_client = blob_service.get_container_client(container_name)
-        try:
-            container_client.create_container()
-            logger.info(f"Container {container_name} criado")
-        except ResourceExistsError:
-            logger.info(f"Container {container_name} já existe")
-    except Exception as e:
-        logger.exception("Falha ao conectar no Azure Blob Storage")
-        return func.HttpResponse(
-            body=f'{{"success": false, "error": "Falha ao conectar no storage: {str(e)}"}}',
-            status_code=500,
-            mimetype="application/json"
-        )
+        # Configuração
+        tickers = Config.get_tickers()
+        storage_config = Config.get_storage_config()
+        date_range = Config.get_date_range()
 
-    # Timezone
-    tz = ZoneInfo("America/Sao_Paulo")
-    execution_time = datetime.now(tz)
-
-    # Processa cada ticker
-    try:
-        for ticker in tickers:
-            logger.info(f"Processando {ticker}...")
-
-            # Busca dados históricos do yfinance
-            ticker_obj = yf.Ticker(f"{ticker}.SA")
-            df = ticker_obj.history(
-                start=start_date,
-                end=end_date,
-                interval="1d",
-                auto_adjust=False
+        if not storage_config["conn_str"]:
+            return func.HttpResponse(
+                body='{"success": false, "error": "AzureWebJobsStorage não definido"}',
+                status_code=500,
+                mimetype="application/json"
             )
 
-            if df is None or df.empty:
-                logger.warning(f"Sem dados para {ticker}")
-                continue
+        logger.info(f"Período: {date_range['start']} até {date_range['end']}")
 
-            logger.info(f"{ticker}: {len(df)} registros encontrados")
+        # Clientes
+        container_client = get_storage_client(
+            storage_config["conn_str"],
+            storage_config["container"]
+        )
+        yf_client = YFinanceClient(max_retries=3)
+        parquet_handler = ParquetHandler(container_client)
 
-            # Reset index (Date vira coluna)
-            df = df.reset_index()
+        # Processa tickers
+        for ticker in tickers:
+            try:
+                df = yf_client.fetch_ticker_data(
+                    ticker=ticker,
+                    start=date_range["start"],
+                    end=date_range["end"]
+                )
 
-            # Adiciona metadata
-            df["execution_timestamp"] = execution_time.isoformat()
-            df["ticker"] = ticker
+                if df is None or df.empty:
+                    logger.warning(f"Sem dados para {ticker}")
+                    continue
 
-            # Serializa em Parquet
-            buf = io.BytesIO()
-            df.to_parquet(buf, index=False)
-            buf.seek(0)
+                parquet_handler.save_history_data(df, ticker)
+                logger.info(f"{ticker}: dados salvos com sucesso")
 
-            # Upload no caminho history/{ticker}.parquet
-            blob_path = f"history/{ticker}.parquet"
-            blob_client = container_client.get_blob_client(blob_path)
-            blob_client.upload_blob(buf, overwrite=True)
-
-            logger.info(f"{ticker}: dados salvos em {blob_path}")
-
-            # Pausa breve entre tickers (rate limiting)
-            time.sleep(1)
+            except Exception as e:
+                logger.exception(f"Erro ao processar {ticker}")
+                raise
 
         logger.info("Execução finalizada com sucesso")
         return func.HttpResponse(
@@ -231,8 +165,15 @@ def fetch_history(req: func.HttpRequest) -> func.HttpResponse:
             mimetype="application/json"
         )
 
+    except ValueError as e:
+        logger.error(f"Erro de configuração: {e}")
+        return func.HttpResponse(
+            body=f'{{"success": false, "error": "{str(e)}"}}',
+            status_code=400,
+            mimetype="application/json"
+        )
     except Exception as e:
-        logger.exception("Erro durante processamento")
+        logger.exception("Erro inesperado")
         return func.HttpResponse(
             body=f'{{"success": false, "error": "{str(e)}"}}',
             status_code=500,
