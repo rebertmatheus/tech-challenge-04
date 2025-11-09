@@ -6,3 +6,4 @@ azure-storage-blob
 python-dateutil
 python-dotenv
 numpy
+tzdata
