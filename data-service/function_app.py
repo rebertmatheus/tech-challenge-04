@@ -1,12 +1,13 @@
 import logging
 import json
 import azure.functions as func
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from utils.config import Config
 from utils.storage import get_storage_client
 from utils.yfinance_client import YFinanceClient
 from utils.parquet_handler import ParquetHandler
+from utils.feature_engineering import FeatureEngineer
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -24,6 +25,8 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
     """Busca dados do dia atual para os tickers configurados"""
     logger = setup_logger("fetch_day")
     logger.info("Iniciando execução")
+    
+    engineer = FeatureEngineer()
 
     try:
         # Configuração
@@ -48,6 +51,8 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
         # Data do dia
         tz = ZoneInfo("America/Sao_Paulo")
         now_sp = datetime.now(tz)
+        
+        start_date = now_sp - timedelta(days=90)
 
         # Processa tickers
         successful = 0
@@ -58,7 +63,7 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
             try:
                 df = yf_client.fetch_ticker_data(
                     ticker=ticker,
-                    start=now_sp.strftime("%Y-%m-%d"),
+                    start=start_date.strftime("%Y-%m-%d"),
                     end=now_sp.strftime("%Y-%m-%d")
                 )
 
@@ -66,6 +71,13 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
                     failed += 1
                     results.append(f"{ticker}: Sem dados")
                     continue
+                
+                df = engineer.create_features(df, is_training_data=False)
+                if df is None:
+                    logger.warning(f"{ticker}: create_features retornou None")
+                    continue
+                
+                logger.info(f"Features aplicadas: {df.shape}")
 
                 blob_path = parquet_handler.save_daily_data(df, ticker, now_sp)
                 successful += 1
@@ -114,6 +126,8 @@ def fetch_history(req: func.HttpRequest) -> func.HttpResponse:
     """Busca histórico completo dos tickers"""
     logger = setup_logger("fetch_history")
     logger.info("Iniciando execução")
+    
+    engineer = FeatureEngineer()
 
     try:
         # Configuração
@@ -150,6 +164,15 @@ def fetch_history(req: func.HttpRequest) -> func.HttpResponse:
                 if df is None or df.empty:
                     logger.warning(f"Sem dados para {ticker}")
                     continue
+                
+                logger.info("Aplicando feature engineering (training mode)...")
+                df = engineer.create_features(df, is_training_data=True)
+                
+                if df is None:
+                    logger.warning(f"{ticker}: create_features retornou None")
+                    continue
+                
+                logger.info(f"Features criadas: {df.shape}")
 
                 parquet_handler.save_history_data(df, ticker)
                 logger.info(f"{ticker}: dados salvos com sucesso")
