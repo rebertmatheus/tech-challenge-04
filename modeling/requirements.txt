@@ -1,0 +1,12 @@
+pandas>=1.5
+numpy>=1.23
+scikit-learn>=1.2
+tensorflow>=2.11
+joblib>=1.2
+azure-storage-blob>=12.14
+azure-core>=1.26
+pyarrow>=14.0
+yfinance>=0.2
+tzdata>=2023.3
+torch>=2.0
+pytorch-lightning>=2.0
