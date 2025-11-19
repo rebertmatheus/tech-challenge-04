@@ -72,7 +72,7 @@ class FeatureEngineer:
             has_ohlc = all(col in data.columns for col in ['Open', 'High', 'Low', 'Close'])
             has_open = 'Open' in data.columns
 
-            price_col = 'Close'
+            price_col = 'Adj Close'
 
             self.logger.info(f"Iniciando cálculo de features. Shape inicial: {data.shape}")
             self.logger.info(f"OHLC disponível: {has_ohlc}, Open disponível: {has_open}")
@@ -230,11 +230,7 @@ class FeatureEngineer:
             # ================================================
 
             if is_training_data:
-                data['target'] = np.where(
-                    data[price_col] != 0,
-                    (data[price_col].shift(-target_days) / data[price_col] - 1) * 100,
-                    0
-                )
+                data['target'] = data[price_col].shift(-1) 
 
                 # Remove linhas com NaN
                 initial_rows = len(data)
