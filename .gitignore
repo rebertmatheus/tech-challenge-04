@@ -208,3 +208,4 @@ __marimo__/
 local.settings.json
 
 notebooks/lightning_logs/
+notebooks/checkpoints/
