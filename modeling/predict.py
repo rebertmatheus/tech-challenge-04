@@ -12,7 +12,7 @@ import joblib
 from modeling.dataio import read_parquet_from_blob
 from modeling.dataset import create_windows
 
-from feature_engineering import FeatureEngineer
+from modeling.feature_engineering import FeatureEngineer
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -114,18 +114,26 @@ def main() -> None:
         model.load_state_dict(state_dict)
         model.eval()
 
-    from azure.storage.blob import BlobServiceClient
-    container_client = BlobServiceClient.from_connection_string(args.conn_str).get_container_client(args.container)
-    blob_path = find_latest_daily_blob(container_client, ticker)
-    df = read_parquet_from_blob(args.conn_str, args.container, blob_path)
+    history_blob_path = f"history/{ticker}.parquet"
+    df = read_parquet_from_blob(args.conn_str, args.container, history_blob_path)
+
+    drop_cols = [col for col in ['Date', 'execution_timestamp', 'ticker'] if col in df.columns]
+    df = df.drop(columns=drop_cols, errors='ignore')
 
     engineer = FeatureEngineer()
+
     if not all(col in df.columns for col in feature_cols):
         df_feats = engineer.create_features(df, is_training_data=False)
     else:
         df_feats = df.copy()
 
     df_feats = df_feats.sort_index()
+
+    if len(df_feats) < lookback:
+        raise ValueError(
+            f"Not enough rows for lookback={lookback}. Got only {len(df_feats)} rows in history/{ticker}.parquet"
+        )
+
     df_feats = df_feats.tail(lookback)
 
     missing = [c for c in feature_cols if c not in df_feats.columns]
@@ -147,12 +155,16 @@ def main() -> None:
         pred_target = float(pred_tensor.detach().cpu().numpy().reshape(-1)[0])
 
     latest_close = float(df_feats['Close'].iloc[-1]) if 'Close' in df_feats.columns else None
-    if latest_close:
-        pred_close = latest_close * (1 + pred_target / 100)
-        print(f"Predicted next-day close for {ticker}: {pred_close:.2f} BRL (target {pred_target:.2f}% change)")
-    else:
-        print(f"Predicted next-day target for {ticker}: {pred_target:.2f}% change")
+    pred_price = pred_target
+    print(f"Predicted next-day close for {ticker}: {pred_price:.2f} BRL")
 
+    if latest_close is not None:
+        diff_abs = pred_price - latest_close
+        diff_pct = diff_abs / latest_close * 100
+        print(
+            f"Latest close: {latest_close:.2f} BRL | "
+            f"Δ: {diff_abs:+.2f} BRL ({diff_pct:+.2f}%)"
+        )
 
 if __name__ == "__main__":
     main()

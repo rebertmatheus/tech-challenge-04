@@ -25,15 +25,15 @@ class TimeSeriesDataset(Dataset):
 
 
 class LSTMModel(pl.LightningModule):
-    def __init__(self, input_size: int, hidden_size1: int = 64, hidden_size2: int = 32, lr: float = 1e-3):
+    def __init__(self, input_size: int, hidden_size1: int = 64, hidden_size2: int = 32, lr: float = 1e-3, dropout=0.2):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
 
         self.lstm1 = nn.LSTM(input_size, hidden_size1, batch_first=True)
-        self.dropout1 = nn.Dropout(0.2)
+        self.dropout1 = nn.Dropout(dropout)
         self.lstm2 = nn.LSTM(hidden_size1, hidden_size2, batch_first=True)
-        self.dropout2 = nn.Dropout(0.2)
+        self.dropout2 = nn.Dropout(dropout)
         self.fc = nn.Linear(hidden_size2, 1)
 
         self.criterion = nn.L1Loss()

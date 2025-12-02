@@ -8,8 +8,8 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 import joblib
+from sklearn.preprocessing import StandardScaler
 
 from modeling.dataio import read_parquet_from_blob, upload_local_file_to_blob, ensure_local_dir
 from modeling.dataset import split_train_val_test, create_windows
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
         help="Path to parquet file inside the container (defaults to history/{ticker}.parquet)",
     )
     parser.add_argument(
-        "--lookback", type=int, default=60, help="Number of past days to use in each input window"
+        "--lookback", type=int, default=120, help="Number of past days to use in each input window"
     )
     parser.add_argument(
         "--output-dir", default="artifacts", help="Directory to save model artefacts"
@@ -113,7 +113,7 @@ def main() -> None:
     if args.framework == 'tensorflow':
         # Importing TensorFlow only when needed to avoid unnecessary dependencies and heavyness
         import tensorflow as tf
-        from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, r2_score
 
         from modeling.model import build_lstm_model
         model_tf = build_lstm_model((lookback, X_train.shape[2]))
@@ -142,7 +142,12 @@ def main() -> None:
         mae = float(mean_absolute_error(y_true, y_pred))
         rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
         mape = float(mean_absolute_percentage_error(y_true, y_pred))
-
+        r2 = float(r2_score(y_true, y_pred))
+        
+        true_dir = np.sign(y_true[1:] - y_true[:-1])
+        pred_dir = np.sign(y_pred[1:] - y_pred[:-1])
+        directional_accuracy = float((true_dir == pred_dir).mean())
+        
         # Saving model
         model_filename = 'model.h5'
         model_tf.save(os.path.join(output_dir, model_filename))
@@ -156,7 +161,7 @@ def main() -> None:
                 "PyTorch and PyTorch Lightning must be installed to use the 'pytorch' framework"
             ) from exc
 
-        from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, r2_score
         from modeling.lstm_pl import TimeSeriesDataset, LSTMModel
 
         train_dataset = TimeSeriesDataset(X_train, y_train)
@@ -205,12 +210,20 @@ def main() -> None:
         mae = float(mean_absolute_error(y_true, y_pred))
         rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
         mape = float(mean_absolute_percentage_error(y_true, y_pred))
+        r2 = float(r2_score(y_true, y_pred))
+
+        true_dir = np.sign(y_true[1:] - y_true[:-1])
+        pred_dir = np.sign(y_pred[1:] - y_pred[:-1])
+        directional_accuracy = float((true_dir == pred_dir).mean())
 
         model_filename = 'model.pt'
         ensure_local_dir(output_dir)
         torch.save(model_pl.state_dict(), os.path.join(output_dir, model_filename))
 
-    print(f"Test MAE: {mae:.4f}, RMSE: {rmse:.4f}, MAPE: {mape:.4f}")
+    print(
+        f"Test MAE: {mae:.4f}, RMSE: {rmse:.4f}, MAPE: {mape:.4f}, "
+        f"R2: {r2:.4f}, Directional accuracy: {directional_accuracy:.4f}"
+    )
 
     scaler_path = os.path.join(output_dir, 'scaler.pkl')
     joblib.dump(scaler, scaler_path)
@@ -228,7 +241,10 @@ def main() -> None:
         'mae': mae,
         'rmse': rmse,
         'mape': mape,
+        'r2': r2,
+        'directional_accuracy': directional_accuracy,
     }
+
     with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
         json.dump(metrics, f, indent=2)
 
