@@ -209,3 +209,9 @@ local.settings.json
 
 notebooks/lightning_logs/
 notebooks/checkpoints/
+
+notebooks/.DS_Store
+
+notebooks/data/.DS_Store
+
+notebooks/data/train/.DS_Store
