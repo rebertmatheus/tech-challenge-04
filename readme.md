@@ -241,10 +241,13 @@ Input (23 features × 70-90 timesteps)
 
 #### 5.3 Configurar Segurança
 
-- [ ] Mudar `authLevel` para `ANONYMOUS` nas Functions
-- [ ] Criar Subscription Keys (principal + secundária)
-- [ ] Configurar política de validação de header
-- [ ] Testar autenticação
+- [ ] **Manter** `authLevel` como `FUNCTION` ou `ADMIN` nas Functions (não mudar para ANONYMOUS)
+- [ ] Configurar APIM para acessar Functions usando Function Keys (backend authentication)
+- [ ] Configurar Network Restrictions nas Functions para permitir apenas tráfego do APIM (opcional, mas recomendado)
+- [ ] Criar Subscription Keys no APIM (principal + secundária)
+- [ ] Configurar política de validação de header `Ocp-Apim-Subscription-Key` no APIM
+- [ ] Testar que Functions não são acessíveis diretamente (deve retornar 401/403)
+- [ ] Testar autenticação via APIM (deve funcionar com Subscription Key)
 
 #### 5.4 Políticas e Configurações
 
@@ -620,7 +623,7 @@ Este projeto é de uso acadêmico.
 
 ## 📞 Contatos e Recursos
 
-- **Repositório Git**: [(https://github.com/rebertmatheus/tech-challenge-04)]
+- **Repositório Git**: [https://github.com/rebertmatheus/tech-challenge-04](https://github.com/rebertmatheus/tech-challenge-04)
 - **Azure Portal**: [adicionar link do resource group]
 - **Dashboard de Monitoramento**: [adicionar link quando criado]
 - **Documentação API**: [adicionar link do APIM portal]
