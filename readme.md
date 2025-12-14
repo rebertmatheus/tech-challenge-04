@@ -620,7 +620,7 @@ Este projeto é de uso acadêmico.
 
 ## 📞 Contatos e Recursos
 
-- **Repositório Git**: [adicionar link]
+- **Repositório Git**: [(https://github.com/rebertmatheus/tech-challenge-04)]
 - **Azure Portal**: [adicionar link do resource group]
 - **Dashboard de Monitoramento**: [adicionar link quando criado]
 - **Documentação API**: [adicionar link do APIM portal]
