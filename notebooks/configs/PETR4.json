@@ -1,0 +1,40 @@
+{
+  "TARGET_COL": "target",
+  "FEATURE_COLS": [
+    "Open", "High", "Low", "Adj Close", "Volume",
+    "rsi_7", "rsi_14", "macd_histogram",
+    "ma3", "ma5", "ma9",
+    "distance_ma3", "distance_ma9",
+    "return_1d", "return_3d", "roc_3",
+    "volatility_5d", "volatility_ratio",
+    "relative_volume", "volume_ratio_5",
+    "bb_position", "stoch_k", "gap"
+  ],
+  "DROP_COLUMNS": ["Date", "execution_timestamp", "ticker", "Dividends", "Stock Splits", "Close"],
+  
+  "TRAIN_RATIO": 0.75,
+  "VAL_RATIO": 0.15,
+  "DF_SIZE": 750,
+  
+  "USE_FC_LAYERS": false,
+
+  "LEARNING_RATE": 1e-3,
+  "WEIGHT_DECAY": 5e-6,
+  "SEQUENCE_LENGTH": 70,
+  "BATCH_SIZE": 16,
+  "NUM_LAYERS": 2,
+  "INIT_HIDDEN_SIZE": 200,
+  "SECOND_HIDDEN_SIZE": 100,
+  "FC_HIDDEN_1": 64,
+  "FC_HIDDEN_2": 32,
+  "DROPOUT_VALUE": 0.2,
+  "FC_DROPOUT": 0.1,
+  "EPOCHS": 200,
+  "GRADIENT_CLIP_VAL": 1.5,
+  
+  "ES_MIN_DELTA": 0.0001,
+  "ES_PATIENCE": 15,
+  "RLR_FACTOR": 0.2,
+  "RLR_PATIENCE": 7,
+  "LOG_EVERY_N_STEPS": 10
+}

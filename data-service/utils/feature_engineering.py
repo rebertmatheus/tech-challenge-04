@@ -54,7 +54,7 @@ class FeatureEngineer:
             raise TypeError(f"Esperado pd.DataFrame, recebido {type(df)}")
 
         # Validar colunas obrigatórias
-        required_cols = ['Close', 'Volume']
+        required_cols = ['Close', 'Volume', 'Adj Close']
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             raise ValueError(f"Colunas obrigatórias não encontradas: {missing_cols}")
@@ -231,7 +231,7 @@ class FeatureEngineer:
 
             if is_training_data:
                 data['target'] = data[price_col].shift(-1) 
-
+                
                 # Remove linhas com NaN
                 initial_rows = len(data)
                 data = data.dropna()

@@ -19,6 +19,40 @@ def setup_logger(name: str):
     )
     return logging.getLogger(name)
 
+@app.function_name(name="health_check")
+@app.route(route="health", methods=["GET"])
+def health_check(req: func.HttpRequest) -> func.HttpResponse:
+    """Verifica se o serviço está funcionando"""
+    try:
+        # Data do dia
+        tz = ZoneInfo("America/Sao_Paulo")
+        now_sp = datetime.now(tz)
+        
+        health_status = {
+            "status": "healthy",
+            "service": "data-service",
+            "timestamp": now_sp.isoformat()
+        }
+
+        return func.HttpResponse(
+            json.dumps(health_status),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        error_status = {
+            "status": "unhealthy",
+            "service": "data-service",
+            "error": str(e),
+            "timestamp": now_sp.isoformat()
+        }
+
+        return func.HttpResponse(
+            json.dumps(error_status),
+            status_code=503,
+            mimetype="application/json"
+        )
+
 @app.function_name(name="fetch_day")
 @app.route(route="fetch-day", methods=["GET"])
 def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
