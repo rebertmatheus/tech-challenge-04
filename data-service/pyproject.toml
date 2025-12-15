@@ -1,0 +1,20 @@
+[project]
+name = "data-service"
+version = "0.1.0"
+description = "Azure Functions (Python) timer -> yfinance -> Parquet -> Azure Blob"
+requires-python = ">=3.10"
+dependencies = [
+  "azure-functions>=1.20.0",
+  "azure-storage-blob>=12.20.0",
+  "yfinance>=0.2.40",
+  "pandas>=2.2.2",
+  "pyarrow>=16.1.0",
+  "tzdata>=2024.1",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
