@@ -25,7 +25,7 @@ def get_storage_client(conn_str: str, container_name: str):
         logger.exception("Falha ao conectar no Azure Blob Storage")
         raise
 
-def load_hyperparameters(container_client, ticker: str, version: str = None):
+def load_hyperparameters(container_client, ticker: str):
     """
     Carrega hiperparâmetros do Azure Blob Storage
     
@@ -38,22 +38,12 @@ def load_hyperparameters(container_client, ticker: str, version: str = None):
         dict: Dicionário com hiperparâmetros
     """
     try:
-        if version:
-            blob_path = f"hyperparameters/{ticker}_v{version}.json"
-        else:
-            blob_path = f"hyperparameters/{ticker}.json"
+        blob_path = f"hyperparameters/{ticker}.json"
         
         blob_client = container_client.get_blob_client(blob_path)
         
         if not blob_client.exists():
-            if version:
-                # Tenta sem versão
-                blob_path = f"hyperparameters/{ticker}.json"
-                blob_client = container_client.get_blob_client(blob_path)
-                if not blob_client.exists():
-                    raise FileNotFoundError(f"Hiperparâmetros não encontrados para {ticker}_v{version} ou {ticker}")
-            else:
-                raise FileNotFoundError(f"Hiperparâmetros não encontrados para {ticker}")
+            raise FileNotFoundError(f"Hiperparâmetros não encontrados para {ticker}")
         
         blob_data = blob_client.download_blob().readall()
         hyperparams = json.loads(blob_data.decode('utf-8'))

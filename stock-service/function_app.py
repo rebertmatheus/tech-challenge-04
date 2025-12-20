@@ -8,6 +8,7 @@ from utils.config import Config
 from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model
 from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version
 from utils.trainer import ModelTrainer
+from utils.model import StocksLSTM
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -54,7 +55,7 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 @app.function_name(name="train")
-@app.route(route="train", methods=["GET", "POST"])
+@app.route(route="train", methods=["POST"])
 def train(req: func.HttpRequest) -> func.HttpResponse:
     """Treina modelo LSTM para os tickers configurados"""
     logger = setup_logger("train")
@@ -65,8 +66,7 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
     
     try:
         # 1. Validar e obter parâmetros
-        ticker = req.params.get('ticker') or (json.loads(req.get_body().decode()) if req.get_body() else {}).get('ticker')
-        version = req.params.get('version') or (json.loads(req.get_body().decode()) if req.get_body() else {}).get('version')
+        ticker  = (json.loads(req.get_body().decode()) if req.get_body() else {}).get('ticker')
         
         if not ticker:
             return func.HttpResponse(
@@ -76,7 +76,7 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
             )
         
         ticker = ticker.strip().upper()
-        logger.info(f"Treinando modelo para ticker: {ticker}, versão hiperparâmetros: {version or 'padrão'}")
+        logger.info(f"Treinando modelo para ticker: {ticker}")
         
         # 2. Carregar configurações
         logger.info("Carregando configurações...")
@@ -108,7 +108,7 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
         # 4. Carregar hiperparâmetros
         logger.info(f"Carregando hiperparâmetros para {ticker}...")
         try:
-            hyperparams = load_hyperparameters(container_client, ticker, version)
+            hyperparams = load_hyperparameters(container_client, ticker)
         except FileNotFoundError as e:
             logger.error(f"Hiperparâmetros não encontrados: {e}")
             return func.HttpResponse(
@@ -141,7 +141,9 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
         model_version = get_next_version(container_model_versions, ticker)
         logger.info(f"Próxima versão do modelo: {model_version}")
         
-        # 7. Executar pipeline de treinamento
+        # 7. Instânciar o Modelo e executar pipeline de treinamento
+        logger.info("Instanciando modelo LSTM...")
+        model = StocksLSTM(hyperparams)
         logger.info("Iniciando pipeline de treinamento...")
         trainer = ModelTrainer()
         model_bytes, scaler_bytes, metrics = trainer.train(ticker, hyperparams, df)

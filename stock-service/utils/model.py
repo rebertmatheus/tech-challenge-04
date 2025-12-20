@@ -24,28 +24,59 @@ class StocksLSTM(pl.LightningModule):
         self.config = config
         
         # Camadas LSTM
+        feature_cols = self.get_config("FEATURE_COLS")
+        init_hidden_size = self.get_config("INIT_HIDDEN_SIZE")
+        second_hidden_size = self.get_config("SECOND_HIDDEN_SIZE")
+        dropout_value = self.get_config("DROPOUT_VALUE")
+        num_layers = self.get_config("NUM_LAYERS")
+        
         self.lstm1 = nn.LSTM(
-            input_size=len(config["FEATURE_COLS"]), 
-            hidden_size=config["INIT_HIDDEN_SIZE"]
+            input_size=len(feature_cols), 
+            hidden_size=init_hidden_size
         )
         self.lstm2 = nn.LSTM(
-            config["INIT_HIDDEN_SIZE"], 
-            config["SECOND_HIDDEN_SIZE"]
+            init_hidden_size, 
+            second_hidden_size
         )
         self.lstm3 = nn.LSTM(
-            config["SECOND_HIDDEN_SIZE"], 
-            config["SECOND_HIDDEN_SIZE"], 
-            dropout=config["DROPOUT_VALUE"], 
-            num_layers=config["NUM_LAYERS"]
+            second_hidden_size, 
+            second_hidden_size, 
+            dropout=dropout_value, 
+            num_layers=num_layers
         )
-        self.dropout = nn.Dropout(p=config["DROPOUT_VALUE"])
-        self.linear = nn.Linear(
-            in_features=config["SECOND_HIDDEN_SIZE"], 
-            out_features=1
-        )
+        self.dropout = nn.Dropout(p=dropout_value)
+        
+        # Verificar se deve usar camadas FC adicionais (nn.Sequential)
+        use_fc_layers = self.get_config("USE_FC_LAYERS", False)
+        
+        if use_fc_layers:
+            # Usar nn.Sequential com múltiplas camadas FC
+            fc_hidden_1 = self.get_config("FC_HIDDEN_1", 64)
+            fc_hidden_2 = self.get_config("FC_HIDDEN_2", 32)
+            fc_dropout = self.get_config("FC_DROPOUT", 0.1)
+            
+            self.fc = nn.Sequential(
+                nn.Linear(second_hidden_size, fc_hidden_1),
+                nn.ReLU(),
+                nn.Dropout(fc_dropout),
+                nn.Linear(fc_hidden_1, fc_hidden_2),
+                nn.ReLU(),
+                nn.Dropout(fc_dropout),
+                nn.Linear(fc_hidden_2, 1)
+            )
+        else:
+            # Manter original (1 camada)
+            self.fc = nn.Linear(
+                in_features=second_hidden_size,
+                out_features=1
+            )
         
         # Salvar hiperparâmetros para PyTorch Lightning
         self.save_hyperparameters()
+    
+    # Helper para obter valor do config (dict ou objeto)
+    def get_config(self, key, default=None):
+        return self.config.get(key, default) if isinstance(self.config, dict) else getattr(self.config, key, default)
     
     def forward(self, x):
         """
@@ -70,7 +101,7 @@ class StocksLSTM(pl.LightningModule):
         # Pegar última saída da sequência
         x = x[-1]
         x = self.dropout(x)
-        x = self.linear(x)
+        x = self.fc(x)
         
         return x
     
@@ -105,17 +136,18 @@ class StocksLSTM(pl.LightningModule):
     
     def configure_optimizers(self):
         """Configura otimizador e scheduler"""
+        
         optimizer = torch.optim.Adam(
             self.parameters(),
-            lr=self.config["LEARNING_RATE"],
-            weight_decay=self.config["WEIGHT_DECAY"]
+            lr=self.get_config("LEARNING_RATE"),
+            weight_decay=self.get_config("WEIGHT_DECAY")
         )
         
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode='min',
-            factor=self.config["RLR_FACTOR"],
-            patience=self.config["RLR_PATIENCE"]
+            factor=self.get_config("RLR_FACTOR"),
+            patience=self.get_config("RLR_PATIENCE")
         )
         
         return {

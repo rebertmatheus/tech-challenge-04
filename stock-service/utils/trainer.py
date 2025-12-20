@@ -23,7 +23,7 @@ class ModelTrainer:
     def __init__(self):
         self.temp_dir = None
     
-    def train(self, ticker: str, hyperparams: dict, df: pd.DataFrame):
+    def train(self, model: StocksLSTM, ticker: str, hyperparams: dict, df: pd.DataFrame):
         """
         Executa pipeline completo de treinamento
         
@@ -72,10 +72,6 @@ class ModelTrainer:
                 shuffle=False,
                 num_workers=0
             )
-            
-            # 3. Instanciar modelo
-            logger.info("Instanciando modelo LSTM...")
-            model = StocksLSTM(hyperparams)
             
             # 4. Configurar callbacks
             logger.info("Configurando callbacks...")

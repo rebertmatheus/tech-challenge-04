@@ -75,7 +75,7 @@ def get_next_version(container_model_versions, ticker: str):
         
         items = list(container_model_versions.query_items(
             query=query,
-            enable_cross_partition_query=False
+            partition_key=ticker
         ))
         
         if not items:
