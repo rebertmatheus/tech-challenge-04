@@ -34,3 +34,22 @@ class Config:
             "models_path": "models",
             "history_path": "history"
         }
+    
+    @staticmethod
+    def enable_progress_bar():
+        """
+        Verifica se deve habilitar progress bar baseado em variável de ambiente
+        Por padrão, desabilita em produção (Azure Functions)
+        """
+        env_value = os.getenv("ENABLE_PROGRESS_BAR", "").lower()
+        
+        # Se explicitamente definido, respeita
+        if env_value in ("true", "1", "yes"):
+            return True
+        if env_value in ("false", "0", "no"):
+            return False
+        
+        # Por padrão, verifica se está rodando localmente
+        # Azure Functions geralmente tem WEBSITE_INSTANCE_ID definido
+        is_azure = os.getenv("WEBSITE_INSTANCE_ID") is not None
+        return not is_azure  # True se local, False se Azure

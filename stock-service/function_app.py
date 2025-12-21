@@ -5,10 +5,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from utils.config import Config
-from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model
-from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version
+from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model, load_metrics
+from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version, get_latest_version
 from utils.trainer import ModelTrainer
-from utils.model import StocksLSTM
+from utils.stocks_lstm import StocksLSTM
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -24,11 +24,12 @@ def setup_logger(name: str):
 @app.route(route="health", methods=["GET"])
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """Verifica se o serviço está funcionando"""
-    try:
-        # Data do dia
-        tz = ZoneInfo("America/Sao_Paulo")
-        now_sp = datetime.now(tz)
-        
+    
+    # Data do dia
+    tz = ZoneInfo("America/Sao_Paulo")
+    now_sp = datetime.now(tz)
+    
+    try:        
         health_status = {
             "status": "healthy",
             "service": "stock-service",
@@ -146,12 +147,12 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
         model = StocksLSTM(hyperparams)
         logger.info("Iniciando pipeline de treinamento...")
         trainer = ModelTrainer()
-        model_bytes, scaler_bytes, metrics = trainer.train(ticker, hyperparams, df)
+        model_bytes, scaler_bytes, metrics_bytes, metrics = trainer.train(model, ticker, hyperparams, df)
         logger.info("Treinamento concluído com sucesso")
         
         # 8. Salvar artefatos no Storage
-        logger.info(f"Salvando modelo e scaler no Storage...")
-        paths = save_model(container_client, ticker, model_version, model_bytes, scaler_bytes)
+        logger.info(f"Salvando modelo, scaler e métricas no Storage...")
+        paths = save_model(container_client, ticker, model_version, model_bytes, scaler_bytes, metrics_bytes)
         logger.info(f"Artefatos salvos: {paths}")
         
         # 9. Salvar métricas no Cosmos DB
@@ -177,6 +178,7 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
             "metrics": metrics,
             "model_path": paths["model_path"],
             "scaler_path": paths["scaler_path"],
+            "metrics_path": paths["metrics_path"],
             "timestamp_start": timestamp_start,
             "timestamp_end": timestamp_end
         }
@@ -252,6 +254,124 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
         logger.exception("Erro inesperado")
         return func.HttpResponse(
             body=f'{{"success": false, "error": "{str(e)}"}}',
+            status_code=500,
+            mimetype="application/json"
+        )
+
+@app.function_name(name="metrics")
+@app.route(route="metrics", methods=["POST"])
+def metrics(req: func.HttpRequest) -> func.HttpResponse:
+    """Retorna métricas de um modelo treinado"""
+    logger = setup_logger("metrics")
+    logger.info("Iniciando execução do endpoint /metrics")
+    
+    try:
+        # 1. Validar e obter parâmetros do body
+        body = json.loads(req.get_body().decode()) if req.get_body() else {}
+        ticker = body.get('ticker')
+        version = body.get('version')  # Opcional
+        
+        if not ticker:
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": "Parâmetro 'ticker' é obrigatório"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+        
+        ticker = ticker.strip().upper()
+        logger.info(f"Consultando métricas para ticker: {ticker}, versão: {version or 'mais recente'}")
+        
+        # 2. Carregar configurações
+        logger.info("Carregando configurações...")
+        storage_config = Config.get_storage_config()
+        cosmos_config = Config.get_cosmos_config()
+        
+        if not storage_config["conn_str"]:
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": "AzureWebJobsStorage não definido"}),
+                status_code=500,
+                mimetype="application/json"
+            )
+        
+        # 3. Conectar aos serviços
+        logger.info("Conectando aos serviços Azure...")
+        container_client = get_storage_client(storage_config["conn_str"], storage_config["container"])
+        
+        # 4. Determinar versão a usar
+        if not version:
+            # Buscar versão mais recente no Cosmos DB
+            if not cosmos_config["conn_str"]:
+                return func.HttpResponse(
+                    body=json.dumps({"success": False, "error": "COSMOS_DB_CONNECTION_STRING não definido (necessário para buscar versão mais recente)"}),
+                    status_code=500,
+                    mimetype="application/json"
+                )
+            
+            _, _, container_model_versions, _ = get_cosmos_client(
+                cosmos_config["conn_str"], 
+                cosmos_config["database"]
+            )
+            
+            logger.info("Buscando versão mais recente no Cosmos DB...")
+            version = get_latest_version(container_model_versions, ticker)
+            
+            if not version:
+                return func.HttpResponse(
+                    body=json.dumps({"success": False, "error": f"Nenhuma versão encontrada para {ticker}"}),
+                    status_code=404,
+                    mimetype="application/json"
+                )
+            
+            logger.info(f"Versão mais recente encontrada: {version}")
+        else:
+            version = version.strip()
+        
+        # 5. Carregar métricas do Storage
+        logger.info(f"Carregando métricas para {ticker}_{version}...")
+        try:
+            metrics_data = load_metrics(container_client, ticker, version)
+        except FileNotFoundError as e:
+            logger.error(f"Métricas não encontradas: {e}")
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": f"Métricas não encontradas para {ticker}_{version}"}),
+                status_code=404,
+                mimetype="application/json"
+            )
+        
+        # 6. Resposta de sucesso
+        response = {
+            "success": True,
+            "ticker": ticker,
+            "version": version,
+            "metrics": metrics_data
+        }
+        
+        logger.info(f"Métricas retornadas com sucesso para {ticker}_{version}")
+        
+        return func.HttpResponse(
+            body=json.dumps(response, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+    
+    except ValueError as e:
+        logger.error(f"Erro de validação: {e}")
+        return func.HttpResponse(
+            body=json.dumps({"success": False, "error": str(e)}),
+            status_code=400,
+            mimetype="application/json"
+        )
+    except FileNotFoundError as e:
+        logger.error(f"Métricas não encontradas: {e}")
+        return func.HttpResponse(
+            body=json.dumps({"success": False, "error": str(e)}),
+            status_code=404,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logger.exception("Erro inesperado ao consultar métricas")
+        return func.HttpResponse(
+            body=json.dumps({"success": False, "error": str(e)}),
             status_code=500,
             mimetype="application/json"
         )

@@ -96,6 +96,38 @@ def get_next_version(container_model_versions, ticker: str):
         logger.warning(f"Retornando v1 como fallback para {ticker}")
         return "v1"
 
+def get_latest_version(container_model_versions, ticker: str):
+    """
+    Retorna a versão mais recente do modelo para um ticker
+    
+    Args:
+        container_model_versions: Container do Cosmos DB
+        ticker: Ticker da ação (ex: "PETR4")
+    
+    Returns:
+        str: Versão mais recente (ex: "v3") ou None se não houver versões
+    """
+    try:
+        # Query para buscar todas as versões do ticker ordenadas por timestamp
+        query = f"SELECT * FROM c WHERE c.ticker = '{ticker}' AND c.status = 'completed' ORDER BY c.timestamp DESC"
+        
+        items = list(container_model_versions.query_items(
+            query=query,
+            partition_key=ticker
+        ))
+        
+        if not items:
+            return None
+        
+        # Retornar a versão mais recente (primeiro item da lista ordenada)
+        latest_version = items[0].get("version")
+        logger.info(f"Versão mais recente encontrada para {ticker}: {latest_version}")
+        return latest_version
+    
+    except Exception as e:
+        logger.exception(f"Erro ao obter versão mais recente para {ticker}")
+        return None
+
 def save_model_version(container_model_versions, ticker: str, version: str, metrics: dict, 
                        hyperparams: dict, model_path: str, scaler_path: str, status: str = "completed"):
     """
@@ -106,7 +138,7 @@ def save_model_version(container_model_versions, ticker: str, version: str, metr
         ticker: Ticker da ação
         version: Versão do modelo (ex: "v1")
         metrics: Dicionário com métricas de validação e teste
-        hyperparams: Dicionário com hiperparâmetros principais
+        hyperparams: Dicionário com todos os hiperparâmetros
         model_path: Caminho do modelo no Storage
         scaler_path: Caminho do scaler no Storage
         status: Status do treinamento ("completed", "failed", etc.)
@@ -122,17 +154,7 @@ def save_model_version(container_model_versions, ticker: str, version: str, metr
             "timestamp": timestamp,
             "status": status,
             "metrics": metrics,
-            "hyperparams": {
-                "sequence_length": hyperparams.get("SEQUENCE_LENGTH"),
-                "learning_rate": hyperparams.get("LEARNING_RATE"),
-                "batch_size": hyperparams.get("BATCH_SIZE"),
-                "epochs": hyperparams.get("EPOCHS"),
-                "dropout": hyperparams.get("DROPOUT_VALUE"),
-                "hidden_sizes": {
-                    "init": hyperparams.get("INIT_HIDDEN_SIZE"),
-                    "second": hyperparams.get("SECOND_HIDDEN_SIZE")
-                }
-            },
+            "hyperparams": hyperparams,  # Salva todos os hiperparâmetros
             "model_path": model_path,
             "scaler_path": scaler_path
         }
@@ -144,9 +166,9 @@ def save_model_version(container_model_versions, ticker: str, version: str, metr
         logger.exception(f"Erro ao salvar versão do modelo no Cosmos DB: {ticker}_{version}")
         raise
 
-def save_training_metrics(container_training_metrics, ticker: str, version: str, 
-                          train_loss_history: list = None, val_loss_history: list = None,
-                          learning_rates: list = None):
+def save_training_metrics(container_training_metrics, ticker: str,
+                            version: str, train_loss_history: list = None,
+                            val_loss_history: list = None, learning_rates: list = None):
     """
     Salva métricas detalhadas de treinamento (opcional)
     

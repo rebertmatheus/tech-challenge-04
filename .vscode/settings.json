@@ -9,5 +9,8 @@
     "python.defaultInterpreterPath": "${workspaceFolder}/stock-service/.venv/bin/python",
     "python.analysis.extraPaths": [
         "${workspaceFolder}/stock-service"
+    ],
+    "cursorpyright.analysis.extraPaths": [
+        "${workspaceFolder}/stock-service"
     ]
 }

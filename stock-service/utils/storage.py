@@ -5,6 +5,7 @@ import json
 import pandas as pd
 import io
 import joblib
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -86,9 +87,9 @@ def load_history_data(container_client, ticker: str):
         logger.exception(f"Erro ao carregar dados históricos para {ticker}")
         raise
 
-def save_model(container_client, ticker: str, version: str, model_bytes: bytes, scaler_bytes: bytes):
+def save_model(container_client, ticker: str, version: str, model_bytes: bytes, scaler_bytes: bytes, metrics_bytes: bytes = None):
     """
-    Salva modelo e scaler no Azure Blob Storage
+    Salva modelo, scaler e métricas no Azure Blob Storage
     
     Args:
         container_client: Container client do Azure Blob Storage
@@ -96,13 +97,14 @@ def save_model(container_client, ticker: str, version: str, model_bytes: bytes, 
         version: Versão do modelo (ex: "v1")
         model_bytes: Bytes do modelo PyTorch Lightning checkpoint
         scaler_bytes: Bytes do scaler (joblib pickle)
+        metrics_bytes: Bytes das métricas (joblib pickle, opcional)
     
     Returns:
         dict: Caminhos dos arquivos salvos
     """
     try:
-        model_path = f"models/{ticker}_v{version}.ckpt"
-        scaler_path = f"models/{ticker}_v{version}_scaler.pkl"
+        model_path = f"models/{ticker}_{version}.ckpt"
+        scaler_path = f"models/{ticker}_{version}_scaler.pkl"
         
         # Salvar modelo
         model_blob = container_client.get_blob_client(model_path)
@@ -114,11 +116,50 @@ def save_model(container_client, ticker: str, version: str, model_bytes: bytes, 
         scaler_blob.upload_blob(scaler_bytes, overwrite=True)
         logger.info(f"Scaler salvo: {scaler_path}")
         
-        return {
+        result = {
             "model_path": model_path,
             "scaler_path": scaler_path
         }
+        
+        # Salvar métricas se fornecidas
+        if metrics_bytes:
+            metrics_path = f"models/{ticker}_{version}_metrics.pkl"
+            metrics_blob = container_client.get_blob_client(metrics_path)
+            metrics_blob.upload_blob(metrics_bytes, overwrite=True)
+            logger.info(f"Métricas salvas: {metrics_path}")
+            result["metrics_path"] = metrics_path
+        
+        return result
     
     except Exception as e:
-        logger.exception(f"Erro ao salvar modelo para {ticker}_v{version}")
+        logger.exception(f"Erro ao salvar modelo para {ticker}_{version}")
+        raise
+
+def load_metrics(container_client, ticker: str, version: str):
+    """
+    Carrega métricas do Azure Blob Storage
+    
+    Args:
+        container_client: Container client do Azure Blob Storage
+        ticker: Ticker da ação (ex: "PETR4")
+        version: Versão do modelo (ex: "v1")
+    
+    Returns:
+        dict: Dicionário com métricas (validacao, teste, config)
+    """
+    try:
+        blob_path = f"models/{ticker}_{version}_metrics.pkl"
+        blob_client = container_client.get_blob_client(blob_path)
+        
+        if not blob_client.exists():
+            raise FileNotFoundError(f"Métricas não encontradas: {blob_path}")
+        
+        blob_data = blob_client.download_blob().readall()
+        metrics = joblib.load(io.BytesIO(blob_data))
+        
+        logger.info(f"Métricas carregadas: {blob_path}")
+        return metrics
+    
+    except Exception as e:
+        logger.exception(f"Erro ao carregar métricas para {ticker}_{version}")
         raise

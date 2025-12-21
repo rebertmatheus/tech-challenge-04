@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.loggers import CSVLogger
 import pandas as pd
 import io
 import joblib
@@ -10,8 +11,9 @@ import tempfile
 import os
 
 from .dataset import SequenceDataset
-from .model import StocksLSTM
+from .stocks_lstm import StocksLSTM
 from .metrics import calculate_metrics
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +81,23 @@ class ModelTrainer:
             
             # 5. Configurar trainer
             logger.info("Configurando PyTorch Lightning Trainer...")
+            
+            # Logger CSV mínimo (permite LearningRateMonitor funcionar sem gerar muito output)
+            csv_logger = CSVLogger(save_dir=self.temp_dir, name="logs")
+            
+            # Verificar se deve habilitar progress bar (baseado em variável de ambiente)
+            enable_progress = Config.enable_progress_bar()
+            logger.info(f"Progress bar habilitado: {enable_progress}")
+            
             trainer = pl.Trainer(
                 max_epochs=hyperparams["EPOCHS"],
-                accelerator='cpu',  # Azure Functions Basic plan não tem GPU
+                accelerator='auto',  # Detecta GPU/MPS/CPU automaticamente
                 callbacks=callbacks,
+                logger=csv_logger,  # Logger mínimo para LearningRateMonitor funcionar
                 log_every_n_steps=hyperparams.get("LOG_EVERY_N_STEPS", 10),
                 gradient_clip_val=hyperparams.get("GRADIENT_CLIP_VAL", 1.5),
-                enable_progress_bar=False,  # Reduzir output em produção
-                logger=False  # Desabilitar logger do Lightning
+                enable_progress_bar=enable_progress,  # Controlado por variável de ambiente
+                enable_model_summary=False  # Reduzir output
             )
             
             # 6. Executar treinamento
@@ -95,9 +106,10 @@ class ModelTrainer:
             
             # 7. Carregar melhor modelo do checkpoint
             logger.info("Carregando melhor modelo do checkpoint...")
-            best_model_path = callbacks[1].best_model_path  # ModelCheckpoint é o segundo callback
+            best_model_path = callbacks[1].best_model_path  # ModelCheckpoint é o segundo callback (índice 1)
             if best_model_path:
                 model = StocksLSTM.load_from_checkpoint(best_model_path, config=hyperparams)
+                logger.info(f"Melhor checkpoint carregado: {best_model_path}")
             else:
                 logger.warning("Nenhum checkpoint encontrado, usando modelo atual")
             
@@ -106,12 +118,13 @@ class ModelTrainer:
             metrics = self._calculate_all_metrics(model, val_loader, test_loader, 
                                                   val_dataset, test_dataset, target_scaler)
             
-            # 9. Serializar modelo e scalers
-            logger.info("Serializando modelo e scalers...")
+            # 9. Serializar modelo, scalers e métricas
+            logger.info("Serializando modelo, scalers e métricas...")
             model_bytes = self._serialize_model(model, best_model_path)
             scaler_bytes = self._serialize_scalers(feature_scaler, target_scaler)
+            metrics_bytes = self._serialize_metrics(metrics, hyperparams)
             
-            return model_bytes, scaler_bytes, metrics
+            return model_bytes, scaler_bytes, metrics_bytes, metrics
         
         except Exception as e:
             logger.exception(f"Erro durante treinamento para {ticker}")
@@ -216,6 +229,7 @@ class ModelTrainer:
             verbose=False
         )
         
+        # LearningRateMonitor mostra o LR a cada epoch (útil para monitorar o scheduler)
         lr_monitor = LearningRateMonitor(logging_interval='epoch')
         
         return [early_stopping, checkpoint, lr_monitor]
@@ -223,6 +237,10 @@ class ModelTrainer:
     def _calculate_all_metrics(self, model, val_loader, test_loader, 
                               val_dataset, test_dataset, target_scaler):
         """Calcula métricas de validação e teste"""
+        # Obter device do modelo
+        device = next(model.parameters()).device
+        logger.info(f"Calculando métricas usando device: {device}")
+        
         # Gerar predições
         model.eval()
         with torch.no_grad():
@@ -230,6 +248,9 @@ class ModelTrainer:
             targets_val = []
             for batch in val_loader:
                 inputs, targets = batch
+                # Mover inputs e targets para o mesmo device do modelo
+                inputs = inputs.to(device)
+                targets = targets.to(device)
                 outputs = model(inputs).flatten()
                 predictions_val.extend(outputs.cpu().numpy())
                 targets_val.extend(targets.cpu().numpy())
@@ -238,6 +259,9 @@ class ModelTrainer:
             targets_test = []
             for batch in test_loader:
                 inputs, targets = batch
+                # Mover inputs e targets para o mesmo device do modelo
+                inputs = inputs.to(device)
+                targets = targets.to(device)
                 outputs = model(inputs).flatten()
                 predictions_test.extend(outputs.cpu().numpy())
                 targets_test.extend(targets.cpu().numpy())
@@ -285,6 +309,26 @@ class ModelTrainer:
         joblib.dump({
             'feature_scaler': feature_scaler,
             'target_scaler': target_scaler
+        }, buffer)
+        buffer.seek(0)
+        return buffer.read()
+    
+    def _serialize_metrics(self, metrics: dict, hyperparams: dict) -> bytes:
+        """Serializa métricas e configuração para bytes usando joblib (igual aos notebooks)"""
+        buffer = io.BytesIO()
+        joblib.dump({
+            'validacao': metrics.get('validation', {}),
+            'teste': metrics.get('test', {}),
+            'config': {
+                'SEQUENCE_LENGTH': hyperparams.get('SEQUENCE_LENGTH'),
+                'BATCH_SIZE': hyperparams.get('BATCH_SIZE'),
+                'LEARNING_RATE': hyperparams.get('LEARNING_RATE'),
+                'DROPOUT_VALUE': hyperparams.get('DROPOUT_VALUE'),
+                'WEIGHT_DECAY': hyperparams.get('WEIGHT_DECAY'),
+                'GRADIENT_CLIP_VAL': hyperparams.get('GRADIENT_CLIP_VAL'),
+                'INIT_HIDDEN_SIZE': hyperparams.get('INIT_HIDDEN_SIZE'),
+                'SECOND_HIDDEN_SIZE': hyperparams.get('SECOND_HIDDEN_SIZE'),
+            }
         }, buffer)
         buffer.seek(0)
         return buffer.read()
