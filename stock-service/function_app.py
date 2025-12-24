@@ -5,10 +5,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from utils.config import Config
-from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model, load_metrics
+from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model, load_metrics, load_model, load_scaler, load_daily_data
 from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version, get_latest_version
 from utils.trainer import ModelTrainer
 from utils.stocks_lstm import StocksLSTM
+from utils.predictor import prepare_prediction_sequence, load_model_from_bytes, predict_price
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -232,29 +233,203 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 @app.function_name(name="predict")
-@app.route(route="predict", methods=["GET", "POST"])
+@app.route(route="predict", methods=["POST"])
 def predict(req: func.HttpRequest) -> func.HttpResponse:
-    """Retorna predição D+1 para os tickers configurados"""
-    print("Hello")
+    """Retorna predição D+1 para um ticker"""
     logger = setup_logger("predict")
-    logger.info("Iniciando execução")
+    logger.info("Iniciando execução do endpoint /predict")
+    
+    tz = ZoneInfo("America/Sao_Paulo")
+    prediction_timestamp = datetime.now(tz).isoformat()
     
     try:
-        # TODO: Implementar lógica de predição
+        # 1. Validar e obter parâmetros do body
+        body = json.loads(req.get_body().decode()) if req.get_body() else {}
+        ticker = body.get('ticker')
+        date_str = body.get('date')  # Opcional: "YYYY-MM-DD"
+        model_version = body.get('version')  # Opcional: versão do modelo
+        
+        if not ticker:
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": "Parâmetro 'ticker' é obrigatório"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+        
+        ticker = ticker.strip().upper()
+        
+        # Processar data: se não fornecida, usar data atual
+        if date_str:
+            try:
+                prediction_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return func.HttpResponse(
+                    body=json.dumps({"success": False, "error": f"Formato de data inválido: {date_str}. Use YYYY-MM-DD"}),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+        else:
+            prediction_date = datetime.now(tz).date()
+        
+        logger.info(f"Predição para ticker: {ticker}, data: {prediction_date}, versão: {model_version or 'mais recente'}")
+        
+        # 2. Carregar configurações
+        logger.info("Carregando configurações...")
+        storage_config = Config.get_storage_config()
+        cosmos_config = Config.get_cosmos_config()
+        
+        if not storage_config["conn_str"]:
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": "AzureWebJobsStorage não definido"}),
+                status_code=500,
+                mimetype="application/json"
+            )
+        
+        # 3. Conectar aos serviços
+        logger.info("Conectando aos serviços Azure...")
+        container_client = get_storage_client(storage_config["conn_str"], storage_config["container"])
+        
+        # 4. Determinar versão do modelo a usar
+        if not model_version:
+            # Buscar versão mais recente no Cosmos DB
+            if not cosmos_config["conn_str"]:
+                return func.HttpResponse(
+                    body=json.dumps({"success": False, "error": "COSMOS_DB_CONNECTION_STRING não definido (necessário para buscar versão mais recente)"}),
+                    status_code=500,
+                    mimetype="application/json"
+                )
+            
+            _, _, container_model_versions = get_cosmos_client(
+                cosmos_config["conn_str"], 
+                cosmos_config["database"]
+            )
+            
+            logger.info("Buscando versão mais recente no Cosmos DB...")
+            model_version = get_latest_version(container_model_versions, ticker)
+            
+            if not model_version:
+                return func.HttpResponse(
+                    body=json.dumps({"success": False, "error": f"Nenhuma versão de modelo encontrada para {ticker}"}),
+                    status_code=404,
+                    mimetype="application/json"
+                )
+            
+            logger.info(f"Versão mais recente encontrada: {model_version}")
+        else:
+            model_version = model_version.strip()
+        
+        # 5. Carregar hiperparâmetros
+        logger.info(f"Carregando hiperparâmetros para {ticker}...")
+        try:
+            hyperparams = load_hyperparameters(container_client, ticker)
+        except FileNotFoundError as e:
+            logger.error(f"Hiperparâmetros não encontrados: {e}")
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": f"Hiperparâmetros não encontrados para {ticker}"}),
+                status_code=404,
+                mimetype="application/json"
+            )
+        
+        # 6. Carregar modelo e scaler
+        logger.info(f"Carregando modelo e scaler para {ticker}_{model_version}...")
+        try:
+            model_bytes = load_model(container_client, ticker, model_version)
+            scalers_dict = load_scaler(container_client, ticker, model_version)
+            feature_scaler = scalers_dict['feature_scaler']
+            target_scaler = scalers_dict['target_scaler']
+        except FileNotFoundError as e:
+            logger.error(f"Modelo ou scaler não encontrados: {e}")
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": f"Modelo ou scaler não encontrados para {ticker}_{model_version}"}),
+                status_code=404,
+                mimetype="application/json"
+            )
+        
+        # 7. Carregar dados diários para predição
+        logger.info(f"Carregando dados diários para {ticker} na data {prediction_date}...")
+        try:
+            df = load_daily_data(container_client, ticker, prediction_date)
+        except FileNotFoundError as e:
+            logger.error(f"Dados diários não encontrados: {e}")
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": f"Dados diários não encontrados para {ticker} na data {prediction_date}"}),
+                status_code=404,
+                mimetype="application/json"
+            )
+        except ValueError as e:
+            logger.error(f"Dados diários inválidos: {e}")
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": f"Dados diários inválidos para {ticker} na data {prediction_date}"}),
+                status_code=400,
+                mimetype="application/json"
+            )
+        
+        # 8. Preparar dados (aplicar DROP_COLUMNS se houver)
+        logger.info("Preparando dados para predição...")
+        drop_columns = hyperparams.get("DROP_COLUMNS", [])
+        df_clean = df.drop(columns=drop_columns, errors='ignore')
+        
+        # 9. Preparar sequência temporal
+        logger.info("Preparando sequência temporal...")
+        try:
+            sequence = prepare_prediction_sequence(df_clean, hyperparams, feature_scaler)
+        except ValueError as e:
+            logger.error(f"Erro ao preparar sequência: {e}")
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": str(e)}),
+                status_code=400,
+                mimetype="application/json"
+            )
+        
+        # 10. Carregar modelo e executar predição
+        logger.info("Carregando modelo e executando predição...")
+        try:
+            model = load_model_from_bytes(model_bytes, hyperparams)
+            predicted_price = predict_price(model, sequence, target_scaler)
+        except Exception as e:
+            logger.exception("Erro ao executar predição")
+            return func.HttpResponse(
+                body=json.dumps({"success": False, "error": f"Erro ao executar predição: {str(e)}"}),
+                status_code=500,
+                mimetype="application/json"
+            )
+        
+        # 11. Resposta de sucesso
         response = {
             "success": True,
-            "message": "Predict endpoint - Hello"
+            "ticker": ticker,
+            "model_version": model_version,
+            "prediction_date": prediction_date.strftime("%Y-%m-%d"),
+            "predicted_price": round(predicted_price, 2),
+            "prediction_timestamp": prediction_timestamp
         }
-
+        
+        logger.info(f"Predição concluída com sucesso para {ticker}_{model_version}: R$ {predicted_price:.2f}")
+        
         return func.HttpResponse(
-            body=json.dumps(response),
+            body=json.dumps(response, indent=2),
             status_code=200,
             mimetype="application/json"
         )
-    except Exception as e:
-        logger.exception("Erro inesperado")
+    
+    except ValueError as e:
+        logger.error(f"Erro de validação: {e}")
         return func.HttpResponse(
-            body=f'{{"success": false, "error": "{str(e)}"}}',
+            body=json.dumps({"success": False, "error": str(e)}),
+            status_code=400,
+            mimetype="application/json"
+        )
+    except FileNotFoundError as e:
+        logger.error(f"Arquivo não encontrado: {e}")
+        return func.HttpResponse(
+            body=json.dumps({"success": False, "error": str(e)}),
+            status_code=404,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        logger.exception("Erro inesperado durante predição")
+        return func.HttpResponse(
+            body=json.dumps({"success": False, "error": str(e)}),
             status_code=500,
             mimetype="application/json"
         )

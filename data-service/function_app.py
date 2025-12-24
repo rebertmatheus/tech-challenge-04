@@ -56,7 +56,7 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
 @app.function_name(name="fetch_day")
 @app.route(route="fetch-day", methods=["GET"])
 def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
-    """Busca dados do dia atual para os tickers configurados"""
+    """Busca dados para os tickers configurados. Aceita parâmetro 'date' opcional (YYYY-MM-DD)"""
     logger = setup_logger("fetch_day")
     logger.info("Iniciando execução")
     
@@ -82,11 +82,44 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
         yf_client = YFinanceClient()
         parquet_handler = ParquetHandler(container_client)
 
-        # Data do dia
+        # Processar parâmetro 'date' (opcional)
         tz = ZoneInfo("America/Sao_Paulo")
         now_sp = datetime.now(tz)
         
-        start_date = now_sp - timedelta(days=90)
+        date_param = req.params.get('date')
+        if date_param:
+            try:
+                # Validar e parsear data
+                target_date = datetime.strptime(date_param, "%Y-%m-%d").date()
+                # Converter para datetime com timezone para comparação
+                target_datetime = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=tz)
+                
+                # Validar que não é data futura
+                if target_datetime > now_sp:
+                    return func.HttpResponse(
+                        body=json.dumps({"success": False, "error": f"Data não pode ser futura: {date_param}"}),
+                        status_code=400,
+                        mimetype="application/json"
+                    )
+                
+                logger.info(f"Data especificada: {target_date}")
+            except ValueError:
+                return func.HttpResponse(
+                    body=json.dumps({"success": False, "error": f"Formato de data inválido: {date_param}. Use YYYY-MM-DD"}),
+                    status_code=400,
+                    mimetype="application/json"
+                )
+        else:
+            # Se não fornecido, usar data atual
+            target_date = now_sp.date()
+            target_datetime = now_sp
+            logger.info(f"Usando data atual: {target_date}")
+
+        # Calcular período de busca (120 dias para trás)
+        start_date = target_datetime - timedelta(days=120)
+        end_date = target_datetime
+        
+        logger.info(f"Período de busca: {start_date.date()} até {end_date.date()} ({120} dias)")
 
         # Processa tickers
         successful = 0
@@ -98,7 +131,7 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
                 df = yf_client.fetch_ticker_data(
                     ticker=ticker,
                     start=start_date.strftime("%Y-%m-%d"),
-                    end=now_sp.strftime("%Y-%m-%d")
+                    end=end_date.strftime("%Y-%m-%d")
                 )
 
                 if df is None or df.empty:
@@ -113,9 +146,10 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
                 
                 logger.info(f"Features aplicadas: {df.shape}")
 
-                blob_path = parquet_handler.save_daily_data(df, ticker, now_sp)
+                # Salvar usando target_datetime (data especificada ou atual)
+                blob_path = parquet_handler.save_daily_data(df, ticker, target_datetime)
                 successful += 1
-                results.append(f"{ticker}: OK")
+                results.append(f"{ticker}: OK ({len(df)} registros)")
 
             except Exception as e:
                 logger.exception(f"Erro ao processar {ticker}")
@@ -125,13 +159,19 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
         # Resposta
         response = {
             "status": "completed",
-            "timestamp": now_sp.isoformat(),
+            "target_date": target_date.strftime("%Y-%m-%d"),
+            "period": {
+                "start": start_date.date().strftime("%Y-%m-%d"),
+                "end": end_date.date().strftime("%Y-%m-%d"),
+                "days": 120
+            },
+            "timestamp": target_datetime.isoformat(),
             "successful": successful,
             "failed": failed,
             "results": results
         }
 
-        logger.info(f"Finalizado: {successful} sucessos, {failed} falhas")
+        logger.info(f"Finalizado: {successful} sucessos, {failed} falhas. Período: {start_date.date()} até {end_date.date()}")
 
         return func.HttpResponse(
             body=json.dumps(response),

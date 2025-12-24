@@ -9,21 +9,46 @@
 			"isBackground": true,
 			"dependsOn": "pip install (functions)",
 			"options": {
-				"cwd": "${workspaceFolder}/data-service"
+				"cwd": "${workspaceFolder}/data-service",
+				"env": {
+					"PYTHONPATH": "${workspaceFolder}/data-service",
+					"PATH": "${workspaceFolder}/data-service/.venv/bin:${env:PATH}",
+					"FUNCTIONS_WORKER_RUNTIME": "Python"
+				}
 			}
 		},
 		{
 			"label": "pip install (functions)",
 			"type": "shell",
 			"osx": {
-				"command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
+				"command": "${workspaceFolder}/data-service/.venv/bin/python -m pip install -r requirements.txt"
 			},
 			"windows": {
-				"command": "${config:azureFunctions.pythonVenv}\\Scripts\\python -m pip install -r requirements.txt"
+				"command": "${workspaceFolder}/data-service/.venv\\Scripts\\python -m pip install -r requirements.txt"
 			},
 			"linux": {
-				"command": "${config:azureFunctions.pythonVenv}/bin/python -m pip install -r requirements.txt"
+				"command": "${workspaceFolder}/data-service/.venv/bin/python -m pip install -r requirements.txt"
 			},
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}/data-service"
+			}
+		},
+		{
+			"type": "func",
+			"label": "func: host start (data-service)",
+			"command": "host start --port 9092",
+			"problemMatcher": "$func-python-watch",
+			"isBackground": true,
+			"dependsOn": "pip install (data-service)",
+			"options": {
+				"cwd": "${workspaceFolder}/data-service"
+			}
+		},
+		{
+			"label": "pip install (data-service)",
+			"type": "shell",
+			"command": "uv sync",
 			"problemMatcher": [],
 			"options": {
 				"cwd": "${workspaceFolder}/data-service"

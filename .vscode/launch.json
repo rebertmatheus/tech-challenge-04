@@ -2,6 +2,16 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Attach to Python Functions (data-service)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 9092
+            },
+            "preLaunchTask": "func: host start (data-service)"
+        },
+        {
             "name": "Attach to Python Functions (stock-service)",
             "type": "debugpy",
             "request": "attach",
