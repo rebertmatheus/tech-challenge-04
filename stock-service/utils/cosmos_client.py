@@ -40,19 +40,7 @@ def get_cosmos_client(conn_str: str, database_name: str):
             logger.exception("Erro ao criar/obter container model_versions")
             raise
         
-        # Criar ou obter container training_metrics
-        try:
-            container_training_metrics = database.create_container_if_not_exists(
-                id="training_metrics",
-                partition_key=PartitionKey(path="/ticker"),
-                offer_throughput=400
-            )
-            logger.info("Container training_metrics verificado/criado")
-        except Exception as e:
-            logger.exception("Erro ao criar/obter container training_metrics")
-            raise
-        
-        return client, database, container_model_versions, container_training_metrics
+        return client, database, container_model_versions
     
     except Exception as e:
         logger.exception("Falha ao conectar no Cosmos DB")
@@ -129,7 +117,7 @@ def get_latest_version(container_model_versions, ticker: str):
         return None
 
 def save_model_version(container_model_versions, ticker: str, version: str, metrics: dict, 
-                       hyperparams: dict, model_path: str, scaler_path: str, status: str = "completed"):
+                       hyperparams: dict, model_path: str, scaler_path: str, metrics_path: str, status: str = "completed"):
     """
     Salva registro de versão do modelo no Cosmos DB
     
@@ -156,7 +144,8 @@ def save_model_version(container_model_versions, ticker: str, version: str, metr
             "metrics": metrics,
             "hyperparams": hyperparams,  # Salva todos os hiperparâmetros
             "model_path": model_path,
-            "scaler_path": scaler_path
+            "scaler_path": scaler_path,
+            "metrics_path": metrics_path
         }
         
         container_model_versions.upsert_item(document)
@@ -165,39 +154,3 @@ def save_model_version(container_model_versions, ticker: str, version: str, metr
     except Exception as e:
         logger.exception(f"Erro ao salvar versão do modelo no Cosmos DB: {ticker}_{version}")
         raise
-
-def save_training_metrics(container_training_metrics, ticker: str,
-                            version: str, train_loss_history: list = None,
-                            val_loss_history: list = None, learning_rates: list = None):
-    """
-    Salva métricas detalhadas de treinamento (opcional)
-    
-    Args:
-        container_training_metrics: Container do Cosmos DB
-        ticker: Ticker da ação
-        version: Versão do modelo
-        train_loss_history: Lista de loss de treinamento por epoch
-        val_loss_history: Lista de loss de validação por epoch
-        learning_rates: Lista de learning rates por epoch
-    """
-    try:
-        tz = ZoneInfo("America/Sao_Paulo")
-        timestamp = datetime.now(tz).isoformat()
-        
-        document = {
-            "id": f"{ticker}_{version}_{timestamp}",
-            "ticker": ticker,
-            "version": version,
-            "timestamp": timestamp,
-            "train_loss": train_loss_history or [],
-            "val_loss": val_loss_history or [],
-            "learning_rates": learning_rates or []
-        }
-        
-        container_training_metrics.upsert_item(document)
-        logger.info(f"Métricas de treinamento salvas no Cosmos DB: {ticker}_{version}")
-    
-    except Exception as e:
-        logger.exception(f"Erro ao salvar métricas de treinamento no Cosmos DB: {ticker}_{version}")
-        # Não levanta exceção pois é opcional
-        logger.warning("Continuando sem salvar métricas detalhadas")

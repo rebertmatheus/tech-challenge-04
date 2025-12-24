@@ -101,7 +101,7 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
         # 3. Conectar aos serviços
         logger.info("Conectando aos serviços Azure...")
         container_client = get_storage_client(storage_config["conn_str"], storage_config["container"])
-        _, _, container_model_versions, container_training_metrics = get_cosmos_client(
+        _, _, container_model_versions = get_cosmos_client(
             cosmos_config["conn_str"], 
             cosmos_config["database"]
         )
@@ -165,6 +165,7 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
             hyperparams=hyperparams,
             model_path=paths["model_path"],
             scaler_path=paths["scaler_path"],
+            metrics_path=paths["metrics_path"],
             status="completed"
         )
         logger.info("Métricas salvas no Cosmos DB")
@@ -307,7 +308,7 @@ def metrics(req: func.HttpRequest) -> func.HttpResponse:
                     mimetype="application/json"
                 )
             
-            _, _, container_model_versions, _ = get_cosmos_client(
+            _, _, container_model_versions = get_cosmos_client(
                 cosmos_config["conn_str"], 
                 cosmos_config["database"]
             )
