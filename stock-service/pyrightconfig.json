@@ -1,0 +1,18 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "pythonVersion": "3.11",
+      "pythonPlatform": "Darwin",
+      "extraPaths": [
+        "${workspaceFolder}/stock-service"
+      ],
+      "venvPath": ".",
+      "venv": ".venv"
+    }
+  ]
+}
+
