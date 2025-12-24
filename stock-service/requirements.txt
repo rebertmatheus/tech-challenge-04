@@ -1,0 +1,14 @@
+azure-functions
+pandas
+pyarrow
+azure-storage-blob
+azure-cosmos
+python-dateutil
+python-dotenv
+numpy
+tzdata
+torch
+pytorch-lightning
+scikit-learn
+joblib
+pylint

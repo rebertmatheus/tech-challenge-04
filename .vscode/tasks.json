@@ -28,6 +28,26 @@
 			"options": {
 				"cwd": "${workspaceFolder}/data-service"
 			}
+		},
+		{
+			"type": "func",
+			"label": "func: host start (stock-service)",
+			"command": "host start",
+			"problemMatcher": "$func-python-watch",
+			"isBackground": true,
+			"dependsOn": "pip install (stock-service)",
+			"options": {
+				"cwd": "${workspaceFolder}/stock-service"
+			}
+		},
+		{
+			"label": "pip install (stock-service)",
+			"type": "shell",
+			"command": "uv sync",
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}/stock-service"
+			}
 		}
 	]
 }

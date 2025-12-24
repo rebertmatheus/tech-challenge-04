@@ -2,14 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Attach to Python Functions",
+            "name": "Attach to Python Functions (stock-service)",
             "type": "debugpy",
             "request": "attach",
             "connect": {
                 "host": "localhost",
                 "port": 9091
             },
-            "preLaunchTask": "func: host start"
+            "preLaunchTask": "func: host start (stock-service)"
         }
     ]
 }
