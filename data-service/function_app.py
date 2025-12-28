@@ -66,7 +66,7 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
         # Configuração
         tickers = Config.get_tickers()
         storage_config = Config.get_storage_config()
-        lookback_period = Config.get_lookback_period()
+        loopback_period = Config.get_loopback_period()
 
         if not storage_config["conn_str"]:
             return func.HttpResponse(
@@ -117,10 +117,10 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
             logger.info(f"Usando data atual: {target_date}")
 
         # Calcular período de busca (X dias para trás)
-        start_date = target_datetime - timedelta(days=lookback_period)
+        start_date = target_datetime - timedelta(days=loopback_period)
         end_date = target_datetime
         
-        logger.info(f"Período de busca: {start_date.date()} até {end_date.date()} ({lookback_period} dias)")
+        logger.info(f"Período de busca: {start_date.date()} até {end_date.date()} ({loopback_period} dias)")
 
         # Processa tickers
         successful = 0
@@ -164,7 +164,7 @@ def fetch_day(req: func.HttpRequest) -> func.HttpResponse:
             "period": {
                 "start": start_date.date().strftime("%Y-%m-%d"),
                 "end": end_date.date().strftime("%Y-%m-%d"),
-                "days": lookback_period
+                "days": loopback_period
             },
             "timestamp": target_datetime.isoformat(),
             "successful": successful,

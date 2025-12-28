@@ -25,10 +25,10 @@ class Config:
         }
     
     @staticmethod
-    def get_lookback_period():
-        lookback_str = os.getenv("LOOPBACK_PERIOD", "120")
+    def get_loopback_period():
+        loopback_str = os.getenv("LOOPBACK_PERIOD", "120")
         try:
-            return int(lookback_str)
+            return int(loopback_str)
         except ValueError:
             # Se não conseguir converter, retorna valor padrão
             return 120
