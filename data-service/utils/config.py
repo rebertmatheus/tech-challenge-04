@@ -23,3 +23,12 @@ class Config:
             "start": os.getenv("START_DATE", "2018-01-01"),
             "end": os.getenv("END_DATE", "2025-10-31")
         }
+    
+    @staticmethod
+    def get_lookback_period():
+        lookback_str = os.getenv("LOOPBACK_PERIOD", "120")
+        try:
+            return int(lookback_str)
+        except ValueError:
+            # Se não conseguir converter, retorna valor padrão
+            return 120

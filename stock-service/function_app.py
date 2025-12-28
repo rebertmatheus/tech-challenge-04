@@ -1,12 +1,12 @@
 import logging
 import json
 import azure.functions as func
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from utils.config import Config
 from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model, load_metrics, load_model, load_scaler, load_daily_data
-from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version, get_latest_version
+from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version, get_latest_version, save_prediction, get_prediction
 from utils.trainer import ModelTrainer
 from utils.stocks_lstm import StocksLSTM
 from utils.predictor import prepare_prediction_sequence, load_model_from_bytes, predict_price
@@ -102,7 +102,7 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
         # 3. Conectar aos serviços
         logger.info("Conectando aos serviços Azure...")
         container_client = get_storage_client(storage_config["conn_str"], storage_config["container"])
-        _, _, container_model_versions = get_cosmos_client(
+        _, _, container_model_versions, _ = get_cosmos_client(
             cosmos_config["conn_str"], 
             cosmos_config["database"]
         )
@@ -289,20 +289,38 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
         logger.info("Conectando aos serviços Azure...")
         container_client = get_storage_client(storage_config["conn_str"], storage_config["container"])
         
-        # 4. Determinar versão do modelo a usar
+        # 4. Calcular data predita (D+1)
+        # Se usamos dados do dia 26, estamos predizendo o dia 27
+        predicted_date = prediction_date + timedelta(days=1)
+        predicted_date_str = predicted_date.strftime("%Y-%m-%d")
+        data_date_str = prediction_date.strftime("%Y-%m-%d")
+        
+        logger.info(f"Usando dados do dia {data_date_str} para predizer o dia {predicted_date_str}")
+        
+        # 5. Conectar ao Cosmos DB (se disponível)
+        cosmos_connected = False
+        container_model_versions = None
+        container_predictions = None
+        
+        if cosmos_config["conn_str"]:
+            try:
+                _, _, container_model_versions, container_predictions = get_cosmos_client(
+                    cosmos_config["conn_str"], 
+                    cosmos_config["database"]
+                )
+                cosmos_connected = True
+                logger.info("Conectado ao Cosmos DB")
+            except Exception as e:
+                logger.warning(f"Erro ao conectar ao Cosmos DB: {e}. Continuando sem cache...")
+        
+        # 6. Determinar versão do modelo a usar (precisa ser antes de verificar cache)
         if not model_version:
-            # Buscar versão mais recente no Cosmos DB
-            if not cosmos_config["conn_str"]:
+            if not cosmos_connected or not container_model_versions:
                 return func.HttpResponse(
                     body=json.dumps({"success": False, "error": "COSMOS_DB_CONNECTION_STRING não definido (necessário para buscar versão mais recente)"}),
                     status_code=500,
                     mimetype="application/json"
                 )
-            
-            _, _, container_model_versions = get_cosmos_client(
-                cosmos_config["conn_str"], 
-                cosmos_config["database"]
-            )
             
             logger.info("Buscando versão mais recente no Cosmos DB...")
             model_version = get_latest_version(container_model_versions, ticker)
@@ -318,7 +336,30 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
         else:
             model_version = model_version.strip()
         
-        # 5. Carregar hiperparâmetros
+        # 7. Verificar cache de predição no Cosmos DB (com versão específica)
+        if cosmos_connected and container_predictions:
+            try:
+                cached_prediction = get_prediction(container_predictions, ticker, model_version, predicted_date_str)
+                if cached_prediction:
+                    logger.info(f"Predição encontrada em cache para {ticker}_{model_version} no dia {predicted_date_str}")
+                    response = {
+                        "success": True,
+                        "ticker": ticker,
+                        "model_version": model_version,
+                        "prediction_date": predicted_date_str,
+                        "predicted_price": cached_prediction["predicted_price"],
+                        "prediction_timestamp": cached_prediction.get("timestamp", prediction_timestamp),
+                        "from_cache": True
+                    }
+                    return func.HttpResponse(
+                        body=json.dumps(response, indent=2),
+                        status_code=200,
+                        mimetype="application/json"
+                    )
+            except Exception as e:
+                logger.warning(f"Erro ao verificar cache: {e}. Continuando com predição...")
+        
+        # 8. Carregar hiperparâmetros
         logger.info(f"Carregando hiperparâmetros para {ticker}...")
         try:
             hyperparams = load_hyperparameters(container_client, ticker)
@@ -330,7 +371,7 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # 6. Carregar modelo e scaler
+        # 9. Carregar modelo e scaler
         logger.info(f"Carregando modelo e scaler para {ticker}_{model_version}...")
         try:
             model_bytes = load_model(container_client, ticker, model_version)
@@ -345,31 +386,31 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # 7. Carregar dados diários para predição
-        logger.info(f"Carregando dados diários para {ticker} na data {prediction_date}...")
+        # 10. Carregar dados diários para predição
+        logger.info(f"Carregando dados diários para {ticker} na data {data_date_str}...")
         try:
             df = load_daily_data(container_client, ticker, prediction_date)
         except FileNotFoundError as e:
             logger.error(f"Dados diários não encontrados: {e}")
             return func.HttpResponse(
-                body=json.dumps({"success": False, "error": f"Dados diários não encontrados para {ticker} na data {prediction_date}"}),
+                body=json.dumps({"success": False, "error": f"Dados diários não encontrados para {ticker} na data {data_date_str}"}),
                 status_code=404,
                 mimetype="application/json"
             )
         except ValueError as e:
             logger.error(f"Dados diários inválidos: {e}")
             return func.HttpResponse(
-                body=json.dumps({"success": False, "error": f"Dados diários inválidos para {ticker} na data {prediction_date}"}),
+                body=json.dumps({"success": False, "error": f"Dados diários inválidos para {ticker} na data {data_date_str}"}),
                 status_code=400,
                 mimetype="application/json"
             )
         
-        # 8. Preparar dados (aplicar DROP_COLUMNS se houver)
+        # 11. Preparar dados (aplicar DROP_COLUMNS se houver)
         logger.info("Preparando dados para predição...")
         drop_columns = hyperparams.get("DROP_COLUMNS", [])
         df_clean = df.drop(columns=drop_columns, errors='ignore')
         
-        # 9. Preparar sequência temporal
+        # 12. Preparar sequência temporal
         logger.info("Preparando sequência temporal...")
         try:
             sequence = prepare_prediction_sequence(df_clean, hyperparams, feature_scaler)
@@ -381,7 +422,7 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # 10. Carregar modelo e executar predição
+        # 13. Carregar modelo e executar predição
         logger.info("Carregando modelo e executando predição...")
         try:
             model = load_model_from_bytes(model_bytes, hyperparams)
@@ -394,17 +435,33 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # 11. Resposta de sucesso
+        # 14. Salvar predição no Cosmos DB (cache)
+        if cosmos_connected and container_predictions:
+            try:
+                save_prediction(
+                    container_predictions,
+                    ticker=ticker,
+                    model_version=model_version,
+                    prediction_date=predicted_date_str,
+                    predicted_price=predicted_price,
+                    data_date=data_date_str
+                )
+                logger.info(f"Predição salva no Cosmos DB para {ticker} no dia {predicted_date_str}")
+            except Exception as e:
+                logger.warning(f"Erro ao salvar predição no Cosmos DB: {e}. Continuando...")
+        
+        # 15. Resposta de sucesso
         response = {
             "success": True,
             "ticker": ticker,
             "model_version": model_version,
-            "prediction_date": prediction_date.strftime("%Y-%m-%d"),
+            "prediction_date": predicted_date_str,  # Data predita (D+1)
             "predicted_price": round(predicted_price, 2),
-            "prediction_timestamp": prediction_timestamp
+            "prediction_timestamp": prediction_timestamp,
+            "from_cache": False
         }
         
-        logger.info(f"Predição concluída com sucesso para {ticker}_{model_version}: R$ {predicted_price:.2f}")
+        logger.info(f"Predição concluída com sucesso para {ticker}_{model_version}: R$ {predicted_price:.2f} (predição para {predicted_date_str})")
         
         return func.HttpResponse(
             body=json.dumps(response, indent=2),
@@ -483,7 +540,7 @@ def metrics(req: func.HttpRequest) -> func.HttpResponse:
                     mimetype="application/json"
                 )
             
-            _, _, container_model_versions = get_cosmos_client(
+            _, _, container_model_versions, _ = get_cosmos_client(
                 cosmos_config["conn_str"], 
                 cosmos_config["database"]
             )
