@@ -1,6 +1,6 @@
 from azure.cosmos import CosmosClient, PartitionKey, exceptions
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import json
 
@@ -15,7 +15,7 @@ def get_cosmos_client(conn_str: str, database_name: str):
         database_name: Nome do database
     
     Returns:
-        tuple: (CosmosClient, Database, Container model_versions, Container training_metrics)
+        tuple: (CosmosClient, Database, Container model_versions, Container predictions)
     """
     try:
         client = CosmosClient.from_connection_string(conn_str)
@@ -40,7 +40,19 @@ def get_cosmos_client(conn_str: str, database_name: str):
             logger.exception("Erro ao criar/obter container model_versions")
             raise
         
-        return client, database, container_model_versions
+        # Criar ou obter container predictions
+        try:
+            container_predictions = database.create_container_if_not_exists(
+                id="predictions",
+                partition_key=PartitionKey(path="/ticker"),
+                offer_throughput=400
+            )
+            logger.info("Container predictions verificado/criado")
+        except Exception as e:
+            logger.exception("Erro ao criar/obter container predictions")
+            raise
+        
+        return client, database, container_model_versions, container_predictions
     
     except Exception as e:
         logger.exception("Falha ao conectar no Cosmos DB")
@@ -153,4 +165,67 @@ def save_model_version(container_model_versions, ticker: str, version: str, metr
     
     except Exception as e:
         logger.exception(f"Erro ao salvar versão do modelo no Cosmos DB: {ticker}_{version}")
+        raise
+
+def save_prediction(container_predictions, ticker: str, model_version: str, 
+                    prediction_date: str, predicted_price: float, data_date: str = None):
+    """
+    Salva predição no Cosmos DB (cache de predições)
+    
+    Args:
+        container_predictions: Container do Cosmos DB para predições
+        ticker: Ticker da ação (ex: "PETR4")
+        model_version: Versão do modelo usado (ex: "v1")
+        prediction_date: Data da predição (D+1, formato "YYYY-MM-DD")
+        predicted_price: Preço predito
+        data_date: Data dos dados usados para predição (opcional, formato "YYYY-MM-DD")
+    """
+    try:
+        tz = ZoneInfo("America/Sao_Paulo")
+        timestamp = datetime.now(tz).isoformat()
+        
+        # ID único: ticker_model_version_prediction_date (inclui versão para permitir múltiplas versões)
+        document = {
+            "id": f"{ticker}_{model_version}_{prediction_date}",
+            "ticker": ticker,
+            "model_version": model_version,
+            "prediction_date": prediction_date,  # Data predita (D+1)
+            "data_date": data_date,  # Data dos dados usados (opcional)
+            "predicted_price": predicted_price,
+            "timestamp": timestamp
+        }
+        
+        container_predictions.upsert_item(document)
+        logger.info(f"Predição salva no Cosmos DB: {ticker}_{model_version} para {prediction_date}")
+    
+    except Exception as e:
+        logger.exception(f"Erro ao salvar predição no Cosmos DB: {ticker}_{model_version}_{prediction_date}")
+        raise
+
+def get_prediction(container_predictions, ticker: str, model_version: str, prediction_date: str):
+    """
+    Busca predição em cache no Cosmos DB
+    
+    Args:
+        container_predictions: Container do Cosmos DB para predições
+        ticker: Ticker da ação (ex: "PETR4")
+        model_version: Versão do modelo (ex: "v1")
+        prediction_date: Data da predição (formato "YYYY-MM-DD")
+    
+    Returns:
+        dict: Documento da predição ou None se não encontrado
+    """
+    try:
+        item_id = f"{ticker}_{model_version}_{prediction_date}"
+        prediction = container_predictions.read_item(
+            item=item_id,
+            partition_key=ticker
+        )
+        logger.info(f"Predição encontrada em cache: {ticker}_{model_version} para {prediction_date}")
+        return prediction
+    except exceptions.CosmosResourceNotFoundError:
+        logger.info(f"Predição não encontrada em cache: {ticker}_{model_version} para {prediction_date}")
+        return None
+    except Exception as e:
+        logger.exception(f"Erro ao buscar predição no Cosmos DB: {ticker}_{model_version}_{prediction_date}")
         raise

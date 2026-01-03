@@ -163,3 +163,102 @@ def load_metrics(container_client, ticker: str, version: str):
     except Exception as e:
         logger.exception(f"Erro ao carregar métricas para {ticker}_{version}")
         raise
+
+def load_model(container_client, ticker: str, version: str):
+    """
+    Carrega modelo do Azure Blob Storage
+    
+    Args:
+        container_client: Container client do Azure Blob Storage
+        ticker: Ticker da ação (ex: "PETR4")
+        version: Versão do modelo (ex: "v1")
+    
+    Returns:
+        bytes: Bytes do modelo checkpoint
+    """
+    try:
+        blob_path = f"models/{ticker}_{version}.ckpt"
+        blob_client = container_client.get_blob_client(blob_path)
+        
+        if not blob_client.exists():
+            raise FileNotFoundError(f"Modelo não encontrado: {blob_path}")
+        
+        blob_data = blob_client.download_blob().readall()
+        
+        logger.info(f"Modelo carregado: {blob_path} ({len(blob_data)} bytes)")
+        return blob_data
+    
+    except Exception as e:
+        logger.exception(f"Erro ao carregar modelo para {ticker}_{version}")
+        raise
+
+def load_scaler(container_client, ticker: str, version: str):
+    """
+    Carrega scaler do Azure Blob Storage
+    
+    Args:
+        container_client: Container client do Azure Blob Storage
+        ticker: Ticker da ação (ex: "PETR4")
+        version: Versão do modelo (ex: "v1")
+    
+    Returns:
+        dict: Dicionário com 'feature_scaler' e 'target_scaler'
+    """
+    try:
+        blob_path = f"models/{ticker}_{version}_scaler.pkl"
+        blob_client = container_client.get_blob_client(blob_path)
+        
+        if not blob_client.exists():
+            raise FileNotFoundError(f"Scaler não encontrado: {blob_path}")
+        
+        blob_data = blob_client.download_blob().readall()
+        scalers = joblib.load(io.BytesIO(blob_data))
+        
+        logger.info(f"Scaler carregado: {blob_path}")
+        return scalers
+    
+    except Exception as e:
+        logger.exception(f"Erro ao carregar scaler para {ticker}_{version}")
+        raise
+
+def load_daily_data(container_client, ticker: str, date):
+    """
+    Carrega dados diários do Azure Blob Storage para uma data específica
+    
+    Args:
+        container_client: Container client do Azure Blob Storage
+        ticker: Ticker da ação (ex: "PETR4")
+        date: Objeto datetime ou string no formato "YYYY-MM-DD"
+    
+    Returns:
+        pd.DataFrame: DataFrame com dados do dia
+    """
+    try:
+        # Converter date para datetime se for string
+        if isinstance(date, str):
+            from datetime import datetime
+            date = datetime.strptime(date, "%Y-%m-%d")
+        
+        # Formatar caminho: YYYY/MM/DD/ticker.parquet
+        year = f"{date.year:04d}"
+        month = f"{date.month:02d}"
+        day = f"{date.day:02d}"
+        blob_path = f"{year}/{month}/{day}/{ticker}.parquet"
+        
+        blob_client = container_client.get_blob_client(blob_path)
+        
+        if not blob_client.exists():
+            raise FileNotFoundError(f"Dados diários não encontrados: {blob_path}")
+        
+        blob_data = blob_client.download_blob().readall()
+        df = pd.read_parquet(io.BytesIO(blob_data))
+        
+        if df.empty:
+            raise ValueError(f"Dados diários vazios para {ticker} na data {date.strftime('%Y-%m-%d')}")
+        
+        logger.info(f"Dados diários carregados: {blob_path} ({len(df)} registros)")
+        return df
+    
+    except Exception as e:
+        logger.exception(f"Erro ao carregar dados diários para {ticker} na data {date}")
+        raise

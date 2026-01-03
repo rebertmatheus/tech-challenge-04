@@ -4,9 +4,25 @@
     "applicationInsights": {
       "samplingSettings": {
         "isEnabled": true,
-        "excludedTypes": "Request"
+        "maxTelemetryItemsPerSecond": 20
       }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Host.Results": "Information",
+      "Function": "Information",
+      "Host.Aggregator": "Information"
     }
+  },
+  "extensions": {
+    "http": {
+      "routePrefix": "api"
+    }
+  },
+  "retry": {
+    "strategy": "fixedDelay",
+    "maxRetryCount": 2,
+    "delayInterval": "00:00:05"
   },
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
