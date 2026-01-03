@@ -20,7 +20,7 @@ def setup_logger(name: str):
     return logging.getLogger(name)
 
 @app.function_name(name="health_check")
-@app.route(route="health", methods=["GET"])
+@app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """Verifica se o serviço está funcionando"""
     try:

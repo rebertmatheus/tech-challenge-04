@@ -1,17 +1,31 @@
 import logging
 import json
+import sys
 import azure.functions as func
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from utils.config import Config
-from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model, load_metrics, load_model, load_scaler, load_daily_data
-from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version, get_latest_version, save_prediction, get_prediction
-from utils.trainer import ModelTrainer
-from utils.stocks_lstm import StocksLSTM
-from utils.predictor import prepare_prediction_sequence, load_model_from_bytes, predict_price
+# Configurar logging básico antes de qualquer importação
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+logger.info("Iniciando importações do function_app.py")
+
+try:
+    from utils.config import Config
+    from utils.storage import get_storage_client, load_hyperparameters, load_history_data, save_model, load_metrics, load_model, load_scaler, load_daily_data
+    from utils.cosmos_client import get_cosmos_client, get_next_version, save_model_version, get_latest_version, save_prediction, get_prediction
+    # Importações pesadas (PyTorch) serão feitas via lazy loading nos endpoints que precisam
+    logger.info("Importações básicas concluídas (PyTorch será carregado sob demanda)")
+except Exception as e:
+    logger.exception(f"Erro ao importar módulos: {e}")
+    raise
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+logger.info("Azure Functions app inicializado com sucesso")
 
 def setup_logger(name: str):
     """Configura logger estruturado"""
@@ -22,7 +36,7 @@ def setup_logger(name: str):
     return logging.getLogger(name)
 
 @app.function_name(name="health_check")
-@app.route(route="health", methods=["GET"])
+@app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """Verifica se o serviço está funcionando"""
     
@@ -143,7 +157,12 @@ def train(req: func.HttpRequest) -> func.HttpResponse:
         model_version = get_next_version(container_model_versions, ticker)
         logger.info(f"Próxima versão do modelo: {model_version}")
         
-        # 7. Instânciar o Modelo e executar pipeline de treinamento
+        # 7. Importar módulos pesados (lazy loading)
+        logger.info("Carregando módulos PyTorch (lazy loading)...")
+        from utils.trainer import ModelTrainer
+        from utils.stocks_lstm import StocksLSTM
+        
+        # 8. Instânciar o Modelo e executar pipeline de treinamento
         logger.info("Instanciando modelo LSTM...")
         model = StocksLSTM(hyperparams)
         logger.info("Iniciando pipeline de treinamento...")
@@ -410,7 +429,11 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
         drop_columns = hyperparams.get("DROP_COLUMNS", [])
         df_clean = df.drop(columns=drop_columns, errors='ignore')
         
-        # 12. Preparar sequência temporal
+        # 12. Importar módulos pesados (lazy loading)
+        logger.info("Carregando módulos PyTorch (lazy loading)...")
+        from utils.predictor import prepare_prediction_sequence, load_model_from_bytes, predict_price
+        
+        # 13. Preparar sequência temporal
         logger.info("Preparando sequência temporal...")
         try:
             sequence = prepare_prediction_sequence(df_clean, hyperparams, feature_scaler)
@@ -422,7 +445,7 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # 13. Carregar modelo e executar predição
+        # 14. Carregar modelo e executar predição
         logger.info("Carregando modelo e executando predição...")
         try:
             model = load_model_from_bytes(model_bytes, hyperparams)
@@ -435,7 +458,7 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # 14. Salvar predição no Cosmos DB (cache)
+        # 15. Salvar predição no Cosmos DB (cache)
         if cosmos_connected and container_predictions:
             try:
                 save_prediction(
@@ -450,7 +473,7 @@ def predict(req: func.HttpRequest) -> func.HttpResponse:
             except Exception as e:
                 logger.warning(f"Erro ao salvar predição no Cosmos DB: {e}. Continuando...")
         
-        # 15. Resposta de sucesso
+        # 16. Resposta de sucesso
         response = {
             "success": True,
             "ticker": ticker,
