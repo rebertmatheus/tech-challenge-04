@@ -217,3 +217,21 @@ notebooks/data/.DS_Store
 notebooks/data/train/.DS_Store
 
 .DS_Store
+
+*.pem
+
+*.pfx
+
+data-service-settings.json
+
+data-service/data-service-policy.xml
+
+data-service/PLANO_DOCUMENTACAO.md
+
+delete-all.sh
+
+migration-script.sh
+
+stock-service-settings.json
+
+stock-service/stock-service-policy.xml
