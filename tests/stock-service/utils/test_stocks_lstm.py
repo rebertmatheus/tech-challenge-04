@@ -6,46 +6,6 @@ from unittest.mock import MagicMock, patch
 import sys
 import os
 
-# Mock torch and pytorch_lightning before importing stocks_lstm
-torch_mock = MagicMock()
-sys.modules['torch'] = torch_mock
-sys.modules['torch.nn'] = MagicMock()
-sys.modules['torch.nn.functional'] = MagicMock()
-sys.modules['torch.optim'] = MagicMock()
-sys.modules['torch.utils'] = MagicMock()
-sys.modules['torch.utils.data'] = MagicMock()
-
-# Mock pytorch_lightning without side_effect
-pl_mock = MagicMock()
-sys.modules['pytorch_lightning'] = pl_mock
-sys.modules['pytorch_lightning.callbacks'] = MagicMock()
-sys.modules['pytorch_lightning.loggers'] = MagicMock()
-
-# Mock other dependencies
-sys.modules['sklearn'] = MagicMock()
-sys.modules['sklearn.preprocessing'] = MagicMock()
-sys.modules['joblib'] = MagicMock()
-
-# Configure torch mocks
-torch_mock.nn = MagicMock()
-torch_mock.nn.LSTM = MagicMock()
-torch_mock.nn.Linear = MagicMock()
-torch_mock.nn.Dropout = MagicMock()
-torch_mock.nn.MSELoss = MagicMock()
-torch_mock.nn.Module = MagicMock()  # Mock nn.Module for inheritance
-torch_mock.optim = MagicMock()
-torch_mock.optim.Adam = MagicMock()
-torch_mock.optim.lr_scheduler = MagicMock()
-torch_mock.optim.lr_scheduler.ReduceLROnPlateau = MagicMock()
-torch_mock.tensor = MagicMock(return_value=MagicMock())  # Mock torch.tensor
-
-# Configure pytorch_lightning mocks
-pl_mock.LightningModule = object  # Use object as base class to avoid mock issues
-pl_mock.callbacks = MagicMock()
-pl_mock.callbacks.Callback = MagicMock()
-pl_mock.loggers = MagicMock()
-pl_mock.loggers.CSVLogger = MagicMock()
-
 # Adicionar o diretório stock-service ao path para importar módulos
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'stock-service'))
 
