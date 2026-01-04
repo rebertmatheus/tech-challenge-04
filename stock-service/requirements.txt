@@ -12,3 +12,6 @@ torch
 pytorch-lightning
 scikit-learn
 joblib
+# Para testes avançados
+pytest-benchmark==4.0.0
+pytest-xdist==3.5.0  # Para testes paralelos
