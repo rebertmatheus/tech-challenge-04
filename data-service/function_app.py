@@ -8,6 +8,7 @@ from utils.storage import get_storage_client
 from utils.yfinance_client import YFinanceClient
 from utils.parquet_handler import ParquetHandler
 from utils.feature_engineering import FeatureEngineer
+from utils.openapi import get_openapi_spec
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
@@ -277,3 +278,75 @@ def fetch_history(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             mimetype="application/json"
         )
+
+@app.function_name(name="swagger_json")
+@app.route(route="swagger.json", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def swagger_json(req: func.HttpRequest) -> func.HttpResponse:
+    """Retorna a especificação OpenAPI 3.0 em formato JSON"""
+    try:
+        spec = get_openapi_spec()
+        return func.HttpResponse(
+            json.dumps(spec, indent=2),
+            status_code=200,
+            mimetype="application/json"
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
+
+@app.function_name(name="swagger_ui")
+@app.route(route="docs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def swagger_ui(req: func.HttpRequest) -> func.HttpResponse:
+    """Retorna a interface Swagger UI para documentação interativa"""
+    html_content = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Data Service API - Documentação</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.3/swagger-ui.css" />
+    <style>
+        html {
+            box-sizing: border-box;
+            overflow: -moz-scrollbars-vertical;
+            overflow-y: scroll;
+        }
+        *, *:before, *:after {
+            box-sizing: inherit;
+        }
+        body {
+            margin:0;
+            background: #fafafa;
+        }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.3/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.3/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = function() {
+            const ui = SwaggerUIBundle({
+                url: "./swagger.json",
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout"
+            });
+        };
+    </script>
+</body>
+</html>"""
+    return func.HttpResponse(
+        html_content,
+        status_code=200,
+        mimetype="text/html"
+    )
