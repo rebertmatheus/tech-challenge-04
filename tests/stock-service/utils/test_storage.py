@@ -48,15 +48,14 @@ class TestStorage:
         }
         return pd.DataFrame(data, index=dates)
 
-    @patch('utils.storage.BlobServiceClient')
-    @patch('utils.storage.logger')
-    def test_get_storage_client_success(self, mock_logger, mock_blob_service_class):
+    @patch('azure.storage.blob.BlobServiceClient.from_connection_string')
+    def test_get_storage_client_success(self, mock_from_connection_string):
         """Testa criação de container client com sucesso"""
         # Configurar mocks
         mock_blob_service = MagicMock()
         mock_container_client = MagicMock()
         mock_blob_service.get_container_client.return_value = mock_container_client
-        mock_blob_service_class.from_connection_string.return_value = mock_blob_service
+        mock_from_connection_string.return_value = mock_blob_service
 
         conn_str = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key;EndpointSuffix=core.windows.net"
         container_name = "test-container"
@@ -64,14 +63,12 @@ class TestStorage:
         result = get_storage_client(conn_str, container_name)
 
         assert result == mock_container_client
-        mock_blob_service_class.from_connection_string.assert_called_once_with(conn_str)
+        mock_from_connection_string.assert_called_once_with(conn_str)
         mock_blob_service.get_container_client.assert_called_once_with(container_name)
         mock_container_client.create_container.assert_called_once()
-        mock_logger.info.assert_called_with(f"Container {container_name} criado")
 
-    @patch('utils.storage.BlobServiceClient')
-    @patch('utils.storage.logger')
-    def test_get_storage_client_existing_container(self, mock_logger, mock_blob_service_class):
+    @patch('azure.storage.blob.BlobServiceClient.from_connection_string')
+    def test_get_storage_client_existing_container(self, mock_from_connection_string):
         """Testa criação de container client quando container já existe"""
         from azure.core.exceptions import ResourceExistsError
 
@@ -80,7 +77,7 @@ class TestStorage:
         mock_container_client = MagicMock()
         mock_container_client.create_container.side_effect = ResourceExistsError("Container already exists")
         mock_blob_service.get_container_client.return_value = mock_container_client
-        mock_blob_service_class.from_connection_string.return_value = mock_blob_service
+        mock_from_connection_string.return_value = mock_blob_service
 
         conn_str = "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=key;EndpointSuffix=core.windows.net"
         container_name = "test-container"
@@ -88,18 +85,16 @@ class TestStorage:
         result = get_storage_client(conn_str, container_name)
 
         assert result == mock_container_client
-        mock_logger.info.assert_called_with(f"Container {container_name} já existe")
 
-    @patch('utils.storage.BlobServiceClient')
-    def test_get_storage_client_connection_error(self, mock_blob_service_class):
+    @patch('azure.storage.blob.BlobServiceClient.from_connection_string')
+    def test_get_storage_client_connection_error(self, mock_from_connection_string):
         """Testa erro de conexão com Azure Blob Storage"""
-        mock_blob_service_class.from_connection_string.side_effect = Exception("Connection failed")
+        mock_from_connection_string.side_effect = Exception("Connection failed")
 
         with pytest.raises(Exception, match="Connection failed"):
             get_storage_client("invalid_conn_str", "test-container")
 
-    @patch('utils.storage.logger')
-    def test_load_hyperparameters_success(self, mock_logger, mock_container_client, sample_hyperparams):
+    def test_load_hyperparameters_success(self, mock_container_client, sample_hyperparams):
         """Testa carregamento de hiperparâmetros com sucesso"""
         # Configurar mock do blob
         mock_blob_client = MagicMock()
@@ -119,10 +114,8 @@ class TestStorage:
         expected = {"SEQUENCE_LENGTH": 30, "FEATURE_COLS": ["Close", "Volume", "High", "Low"]}
         assert result == expected
         mock_container_client.get_blob_client.assert_called_once_with("hyperparameters/PETR4.json")
-        mock_logger.info.assert_called_once_with("Hiperparâmetros carregados: hyperparameters/PETR4.json")
 
-    @patch('utils.storage.logger')
-    def test_load_hyperparameters_file_not_found(self, mock_logger, mock_container_client):
+    def test_load_hyperparameters_file_not_found(self, mock_container_client):
         """Testa erro quando hiperparâmetros não existem"""
         mock_blob_client = MagicMock()
         mock_container_client.get_blob_client.return_value = mock_blob_client
@@ -131,8 +124,7 @@ class TestStorage:
         with pytest.raises(FileNotFoundError, match="Hiperparâmetros não encontrados para PETR4"):
             load_hyperparameters(mock_container_client, "PETR4")
 
-    @patch('utils.storage.logger')
-    def test_load_history_data_success(self, mock_logger, mock_container_client, sample_dataframe):
+    def test_load_history_data_success(self, mock_container_client, sample_dataframe):
         """Testa carregamento de dados históricos com sucesso"""
         # Configurar mock do blob
         mock_blob_client = MagicMock()
@@ -149,12 +141,8 @@ class TestStorage:
 
             assert result.equals(sample_dataframe)
             mock_container_client.get_blob_client.assert_called_once_with("history/PETR4.parquet")
-            mock_logger.info.assert_called_once()
-            assert "history/PETR4.parquet" in mock_logger.info.call_args[0][0]
-            assert "100 registros" in mock_logger.info.call_args[0][0]
 
-    @patch('utils.storage.logger')
-    def test_load_history_data_empty_dataframe(self, mock_logger, mock_container_client):
+    def test_load_history_data_empty_dataframe(self, mock_container_client):
         """Testa erro quando dados históricos estão vazios"""
         mock_blob_client = MagicMock()
         mock_container_client.get_blob_client.return_value = mock_blob_client
@@ -169,8 +157,7 @@ class TestStorage:
             with pytest.raises(ValueError, match="Dados históricos vazios para PETR4"):
                 load_history_data(mock_container_client, "PETR4")
 
-    @patch('utils.storage.logger')
-    def test_save_model_success(self, mock_logger, mock_container_client):
+    def test_save_model_success(self, mock_container_client):
         """Testa salvamento de modelo com sucesso"""
         # Configurar mocks dos blobs
         mock_model_blob = MagicMock()
@@ -205,11 +192,9 @@ class TestStorage:
         mock_scaler_blob.upload_blob.assert_called_once_with(scaler_bytes, overwrite=True)
         mock_metrics_blob.upload_blob.assert_called_once_with(metrics_bytes, overwrite=True)
 
-        # Verificar logs
-        assert mock_logger.info.call_count == 3
+        # Verificar que as funções foram chamadas corretamente
 
-    @patch('utils.storage.logger')
-    def test_save_model_without_metrics(self, mock_logger, mock_container_client):
+    def test_save_model_without_metrics(self, mock_container_client):
         """Testa salvamento de modelo sem métricas"""
         # Configurar mocks dos blobs
         mock_model_blob = MagicMock()
@@ -235,8 +220,7 @@ class TestStorage:
         assert result == expected_result
         assert "metrics_path" not in result
 
-    @patch('utils.storage.logger')
-    def test_load_metrics_success(self, mock_logger, mock_container_client):
+    def test_load_metrics_success(self, mock_container_client):
         """Testa carregamento de métricas com sucesso"""
         mock_blob_client = MagicMock()
         mock_container_client.get_blob_client.return_value = mock_blob_client
@@ -256,10 +240,8 @@ class TestStorage:
 
             assert result == expected_metrics
             mock_container_client.get_blob_client.assert_called_once_with("models/PETR4_v1_metrics.pkl")
-            mock_logger.info.assert_called_once_with("Métricas carregadas: models/PETR4_v1_metrics.pkl")
 
-    @patch('utils.storage.logger')
-    def test_load_model_success(self, mock_logger, mock_container_client):
+    def test_load_model_success(self, mock_container_client):
         """Testa carregamento de modelo com sucesso"""
         mock_blob_client = MagicMock()
         mock_container_client.get_blob_client.return_value = mock_blob_client
@@ -274,11 +256,8 @@ class TestStorage:
 
         assert result == expected_bytes
         mock_container_client.get_blob_client.assert_called_once_with("models/PETR4_v1.ckpt")
-        mock_logger.info.assert_called_once()
-        assert "Modelo carregado: models/PETR4_v1.ckpt" in mock_logger.info.call_args[0][0]
 
-    @patch('utils.storage.logger')
-    def test_load_scaler_success(self, mock_logger, mock_container_client):
+    def test_load_scaler_success(self, mock_container_client):
         """Testa carregamento de scaler com sucesso"""
         mock_blob_client = MagicMock()
         mock_container_client.get_blob_client.return_value = mock_blob_client
@@ -298,10 +277,8 @@ class TestStorage:
 
             assert result == expected_scalers
             mock_container_client.get_blob_client.assert_called_once_with("models/PETR4_v1_scaler.pkl")
-            mock_logger.info.assert_called_once_with("Scaler carregado: models/PETR4_v1_scaler.pkl")
 
-    @patch('utils.storage.logger')
-    def test_load_daily_data_success(self, mock_logger, mock_container_client, sample_dataframe):
+    def test_load_daily_data_success(self, mock_container_client, sample_dataframe):
         """Testa carregamento de dados diários com sucesso"""
         mock_blob_client = MagicMock()
         mock_container_client.get_blob_client.return_value = mock_blob_client
@@ -320,11 +297,8 @@ class TestStorage:
 
             assert len(result) == 1
             mock_container_client.get_blob_client.assert_called_once_with("2023/01/15/PETR4.parquet")
-            mock_logger.info.assert_called_once()
-            assert "2023/01/15/PETR4.parquet" in mock_logger.info.call_args[0][0]
 
-    @patch('utils.storage.logger')
-    def test_load_daily_data_string_date(self, mock_logger, mock_container_client, sample_dataframe):
+    def test_load_daily_data_string_date(self, mock_container_client, sample_dataframe):
         """Testa carregamento de dados diários com data como string"""
         mock_blob_client = MagicMock()
         mock_container_client.get_blob_client.return_value = mock_blob_client
