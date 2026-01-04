@@ -1,6 +1,23 @@
 """Módulo para gerar especificação OpenAPI 3.0 para o Data Service"""
 
+import os
 from typing import Dict, Any
+
+
+def _get_server_base() -> str:
+    """
+    Retorna o server base baseado no ambiente.
+    - Local/Dev: /api
+    - Azure (produção): /api/data (via APIM path-based routing)
+    """
+    # Verifica se está rodando no Azure (produção)
+    # Azure Functions geralmente tem WEBSITE_INSTANCE_ID definido
+    is_azure = os.getenv("WEBSITE_INSTANCE_ID") is not None
+    
+    if is_azure:
+        return "/api/data"
+    else:
+        return "/api"
 
 
 def get_openapi_spec() -> Dict[str, Any]:
@@ -19,8 +36,8 @@ def get_openapi_spec() -> Dict[str, Any]:
         },
         "servers": [
             {
-                "url": "/api",
-                "description": "API base path"
+                "url": _get_server_base(),
+                "description": "API base path (local: /api, Azure: /api/data via APIM)"
             }
         ],
         "tags": [
