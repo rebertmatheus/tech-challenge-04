@@ -58,6 +58,11 @@ def get_openapi_spec() -> Dict[str, Any]:
                 "description": "Endpoints para consulta de métricas de modelos"
             }
         ],
+        "security": [
+            {
+                "apim_subscription_key": []
+            }
+        ],
         "paths": {
             "/health": {
                 "get": {
@@ -368,6 +373,14 @@ def get_openapi_spec() -> Dict[str, Any]:
             }
         },
         "components": {
+            "securitySchemes": {
+                "apim_subscription_key": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "Ocp-Apim-Subscription-Key",
+                    "description": "Subscription key do Azure API Management. Obtida no portal do Azure APIM."
+                }
+            },
             "schemas": {
                 "HealthResponse": {
                     "type": "object",
