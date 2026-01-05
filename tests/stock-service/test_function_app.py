@@ -3,9 +3,7 @@ import importlib.util
 from pathlib import Path
 import sys
 
-# Load module from file path to avoid import issues with the hyphenated package name
 module_path = Path(__file__).parents[2] / "stock-service" / "function_app.py"
-# Ensure `stock-service` utils/ is importable as top-level `utils`
 stock_service_dir = str(module_path.parent)
 if stock_service_dir not in sys.path:
     sys.path.insert(0, stock_service_dir)
