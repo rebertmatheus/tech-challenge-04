@@ -1,0 +1,28 @@
+{
+  "validacao": {
+    "mae": 0.4681309123980362,
+    "mse": 0.34478802220219895,
+    "rmse": 0.587186531012249,
+    "mape": 1.8909425955850534,
+    "r2": 0.5850555953895507,
+    "directional_accuracy": 0.7992831541218638
+  },
+  "teste": {
+    "mae": 1.297518005637859,
+    "mse": 2.119694785081781,
+    "rmse": 1.4559171628502017,
+    "mape": 5.511260871032676,
+    "r2": 0.792384120525873,
+    "directional_accuracy": 0.9516129032258065
+  },
+  "config": {
+    "SEQUENCE_LENGTH": 70,
+    "BATCH_SIZE": 16,
+    "LEARNING_RATE": 0.001,
+    "DROPOUT_VALUE": 0.2,
+    "WEIGHT_DECAY": 5e-06,
+    "GRADIENT_CLIP_VAL": 2,
+    "INIT_HIDDEN_SIZE": 256,
+    "SECOND_HIDDEN_SIZE": 128
+  }
+}
