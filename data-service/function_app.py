@@ -24,11 +24,11 @@ def setup_logger(name: str):
 @app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """Verifica se o serviço está funcionando"""
+    # Data do dia
+    tz = ZoneInfo("America/Sao_Paulo")
+    now_sp = datetime.now(tz)
+    
     try:
-        # Data do dia
-        tz = ZoneInfo("America/Sao_Paulo")
-        now_sp = datetime.now(tz)
-        
         health_status = {
             "status": "healthy",
             "service": "data-service",
